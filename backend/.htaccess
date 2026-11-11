@@ -1,0 +1,40 @@
+# =============================================================================
+# TRACE IC — Configuración Apache / LiteSpeed (cPanel)
+# Dominio: https://trace.icontinental.edu.pe
+# Estrategia URL (Opción A):
+#   - /{slug}  -> Motor de Redirección Ultrarrápido (redirect.php)
+#   - /app/*   -> Panel de Administración React + Vite
+#   - /api/*   -> API REST en PHP 8
+# =============================================================================
+
+Options -Indexes
+RewriteEngine On
+RewriteBase /
+
+# 1. Proteger archivos sensibles de configuración
+<FilesMatch "^(config\.php|config\.example\.php|\.env)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 2. Si entran a la raíz exacta (/), redirigir al panel administrativo (/app/)
+RewriteRule ^$ /app/ [R=302,L]
+
+# 3. Rutas de la API REST (/api/*)
+RewriteCond %{REQUEST_URI} ^/api/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
+
+# 4. Rutas del Panel Administrativo SPA (/app y subrutas de React Router)
+RewriteCond %{REQUEST_URI} ^/app(/.*)?$
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^app(/.*)?$ app/index.html [L]
+
+# 5. Archivos físicos estáticos reales (assets, JS, CSS, imágenes, tracker-snippet.js)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 6. Cualquier otra ruta en raíz (/{slug}) pasa al Motor de Redirección Ultrarrápido
+RewriteRule ^([a-zA-Z0-9\-_]+)/?$ redirect.php?slug=$1 [QSA,L]

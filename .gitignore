@@ -1,0 +1,15 @@
+# Dependencias y enlaces locales
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Credenciales reales de producción (nunca subir a GitHub)
+backend/api/config.php
+deploy-cpanel/api/config.php
+.env
+.env.*
+
+# Archivos del sistema operativo y editores
+.DS_Store
+Thumbs.db
+*.log
