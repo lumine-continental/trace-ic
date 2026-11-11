@@ -32,4 +32,20 @@ Copy-Item (Join-Path $BackendDir "api\*") (Join-Path $DeployDir "api\") -Recurse
 Write-Host "==> 4. Copiando compilacion estatica de React + Vite hacia deploy-cpanel/app/..." -ForegroundColor Cyan
 Copy-Item (Join-Path $FrontendDir "dist\*") (Join-Path $DeployDir "app\") -Recurse
 
-Write-Host "==> LISTO: Paquete de produccion generado en: $DeployDir" -ForegroundColor Green
+$ZipPath = Join-Path $RootDir "deploy-cpanel.zip"
+if (Test-Path $ZipPath) {
+    Remove-Item -Force $ZipPath
+}
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zipStream = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::Create)
+$zipArchive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
+$files = Get-ChildItem -Path $DeployDir -Recurse -Force | Where-Object { -not $_.PSIsContainer }
+foreach ($file in $files) {
+    $relPath = $file.FullName.Substring($DeployDir.Length + 1).Replace('\', '/')
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zipArchive, $file.FullName, $relPath, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+}
+$zipArchive.Dispose()
+$zipStream.Dispose()
+
+Write-Host "==> LISTO: Paquete de produccion generado en: $DeployDir y $ZipPath" -ForegroundColor Green

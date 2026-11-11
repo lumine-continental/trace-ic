@@ -59,9 +59,9 @@ export const App: React.FC = () => {
   // ===========================================================================
   // ESTADOS DE REPORTERÍA (Fechas con calendario + Filtro de Campaña Origen)
   // ===========================================================================
-  const [datePreset, setDatePreset] = useState<DatePreset>('last_30_days');
-  const [startDate, setStartDate] = useState<string>('2026-10-12');
-  const [endDate, setEndDate] = useState<string>('2026-11-11');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [startDate, setStartDate] = useState<string>('2025-01-01');
+  const [endDate, setEndDate] = useState<string>('2029-12-31');
   const [reportCampaignFilter, setReportCampaignFilter] = useState<string>('all');
   const [selectedChannelFilter, setSelectedChannelFilter] = useState<ChannelKey | 'all'>('all');
   const [expandedCampaigns, setExpandedCampaigns] = useState<Record<string, boolean>>({});
@@ -110,7 +110,7 @@ export const App: React.FC = () => {
   const [simIsBot, setSimIsBot] = useState<boolean>(false);
   const [simFeedback, setSimFeedback] = useState<string | null>(null);
 
-  const loadData = () => {
+  const refreshLocalState = () => {
     const loadedLinks = DataEngine.getLinks();
     const loadedRecords = DataEngine.getRecords();
     const loadedWa = DataEngine.getWhatsAppNumbers();
@@ -118,14 +118,26 @@ export const App: React.FC = () => {
     setRecords(loadedRecords);
     setWaNumbers(loadedWa);
 
+    if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
+      setSimRecordId(loadedRecords[0].id);
+    }
+
     const exp: Record<string, boolean> = {};
     loadedRecords.forEach((r) => {
       exp[`${r.channel}::${r.campaign}`] = true;
     });
-    setExpandedCampaigns(exp);
+    setExpandedCampaigns((prev) => ({ ...exp, ...prev }));
+  };
+
+  const loadData = () => {
+    refreshLocalState();
+    void DataEngine.syncFromServer();
   };
 
   useEffect(() => {
+    DataEngine.setOnSync(() => {
+      refreshLocalState();
+    });
     loadData();
   }, []);
 
@@ -137,24 +149,36 @@ export const App: React.FC = () => {
 
   const applyDatePreset = (preset: DatePreset) => {
     setDatePreset(preset);
-    // Fecha actual de referencia del sistema: 2026-11-11
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const todayStr = fmt(now);
+
     if (preset === 'today') {
-      setStartDate('2026-11-11');
-      setEndDate('2026-11-11');
+      setStartDate(todayStr);
+      setEndDate(todayStr);
     } else if (preset === 'this_week') {
-      setStartDate('2026-11-08');
-      setEndDate('2026-11-11');
+      const start = new Date(now);
+      const day = start.getDay() || 7;
+      start.setDate(start.getDate() - (day - 1));
+      setStartDate(fmt(start));
+      setEndDate(todayStr);
     } else if (preset === 'last_7_days') {
-      setStartDate('2026-11-04');
-      setEndDate('2026-11-11');
+      const start = new Date(now);
+      start.setDate(start.getDate() - 7);
+      setStartDate(fmt(start));
+      setEndDate(todayStr);
     } else if (preset === 'last_30_days') {
-      setStartDate('2026-10-12');
-      setEndDate('2026-11-11');
+      const start = new Date(now);
+      start.setDate(start.getDate() - 30);
+      setStartDate(fmt(start));
+      setEndDate(todayStr);
     } else if (preset === 'last_month') {
-      setStartDate('2026-10-01');
-      setEndDate('2026-10-31');
+      const firstPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastPrev = new Date(now.getFullYear(), now.getMonth(), 0);
+      setStartDate(fmt(firstPrev));
+      setEndDate(fmt(lastPrev));
     } else if (preset === 'all') {
-      setStartDate('2026-01-01');
+      setStartDate('2025-01-01');
       setEndDate('2029-12-31');
     }
   };

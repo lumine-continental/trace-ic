@@ -393,6 +393,37 @@ export function buildNormalTrackingUrl(params: {
 }
 
 export class DataEngine {
+  private static onSyncCallback: (() => void) | null = null;
+
+  static setOnSync(cb: () => void): void {
+    this.onSyncCallback = cb;
+  }
+
+  static async syncFromServer(): Promise<boolean> {
+    try {
+      const res = await fetch('/api/state', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (Array.isArray(data.links)) {
+        saveToStorage(STORAGE_KEYS.LINKS, data.links);
+      }
+      if (Array.isArray(data.records)) {
+        saveToStorage(STORAGE_KEYS.RECORDS, data.records);
+      }
+      if (Array.isArray(data.whatsapp_numbers)) {
+        saveToStorage(STORAGE_KEYS.WA_NUMBERS, data.whatsapp_numbers);
+      }
+      if (this.onSyncCallback) {
+        this.onSyncCallback();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   static getLinks(): LinkItem[] {
     return loadFromStorage<LinkItem[]>(STORAGE_KEYS.LINKS, INITIAL_LINKS);
   }
@@ -440,7 +471,7 @@ export class DataEngine {
       finalSlug = normalUrl.replace('https://trace.icontinental.edu.pe/', '');
     }
 
-    const today = '2026-11-11';
+    const today = new Date().toISOString().slice(0, 10);
     const newLink: LinkItem = {
       id: Math.max(0, ...links.map((l) => l.id)) + 1,
       slug: finalSlug,
@@ -464,7 +495,7 @@ export class DataEngine {
     };
 
     const newRecord: SubcampaignRecord = {
-      id: `rec-${Date.now()}`,
+      id: `${newLink.channel}::${newLink.campaign}::${newLink.subcampaign}`,
       channel: newLink.channel,
       campaign: newLink.campaign,
       subcampaign: newLink.subcampaign,
@@ -476,12 +507,25 @@ export class DataEngine {
 
     saveToStorage(STORAGE_KEYS.LINKS, [newLink, ...links]);
     saveToStorage(STORAGE_KEYS.RECORDS, [newRecord, ...records]);
+
+    fetch('/api/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newLink),
+    })
+      .then(() => this.syncFromServer())
+      .catch(() => {});
+
     return newLink;
   }
 
   static deleteLink(id: number): void {
     const links = this.getLinks().filter((l) => l.id !== id);
     saveToStorage(STORAGE_KEYS.LINKS, links);
+
+    fetch(`/api/links/${id}`, { method: 'DELETE' })
+      .then(() => this.syncFromServer())
+      .catch(() => {});
   }
 
   static saveWhatsAppNumber(payload: {
@@ -518,11 +562,31 @@ export class DataEngine {
       };
       saveToStorage(STORAGE_KEYS.WA_NUMBERS, [...list, newItem]);
     }
+
+    fetch('/api/whatsapp-numbers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: payload.id,
+        label: payload.label.trim(),
+        phone_number: cleanPhone,
+        department: payload.department.trim() || 'Admisión',
+        default_greeting:
+          payload.default_greeting.trim() ||
+          'Hola Instituto Continental, deseo recibir información.',
+      }),
+    })
+      .then(() => this.syncFromServer())
+      .catch(() => {});
   }
 
   static deleteWhatsAppNumber(id: number): void {
     const list = this.getWhatsAppNumbers().filter((w) => w.id !== id);
     saveToStorage(STORAGE_KEYS.WA_NUMBERS, list);
+
+    fetch(`/api/whatsapp-numbers/${id}`, { method: 'DELETE' })
+      .then(() => this.syncFromServer())
+      .catch(() => {});
   }
 
   static simulateTestClick(params: {
@@ -538,13 +602,30 @@ export class DataEngine {
     const records = this.getRecords();
     const idx = records.findIndex((r) => r.id === params.recordId);
     if (idx !== -1) {
-      records[idx].clicks += 1;
-      records[idx].unique_visitors += 1;
-      records[idx].last_activity_date = '2026-11-11';
+      const rec = records[idx];
+      rec.clicks += 1;
+      rec.unique_visitors += 1;
+      rec.last_activity_date = new Date().toISOString().slice(0, 10);
       saveToStorage(STORAGE_KEYS.RECORDS, records);
+
+      fetch('/api/simulate-click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_bot: false,
+          channel: rec.channel,
+          campaign: rec.campaign,
+          subcampaign: rec.subcampaign,
+          url_reference: rec.url_reference,
+          short_link: rec.short_link,
+        }),
+      })
+        .then(() => this.syncFromServer())
+        .catch(() => {});
+
       return {
         counted: true,
-        message: `+1 clic real sumado en [${records[idx].campaign}] → ${records[idx].subcampaign}.`,
+        message: `+1 clic real sumado en [${rec.campaign}] → ${rec.subcampaign}.`,
       };
     }
     return { counted: false, message: 'No se encontró el registro.' };

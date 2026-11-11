@@ -53,15 +53,47 @@ try {
         ]);
     }
 
-    // Estado completo para la Reportería y el Generador en Tiempo Real
+    // Endpoint principal en Tiempo Real: devuelve enlaces, números de WhatsApp y conteos de MySQL
     if ($endpoint === 'state' && $method === 'GET') {
         $linksStmt = $pdo->query('SELECT * FROM links ORDER BY id DESC');
-        $waStmt = $pdo->query('SELECT * FROM whatsapp_numbers WHERE is_active = 1 ORDER BY id ASC');
+        $rawLinks = $linksStmt->fetchAll();
+        $links = array_map(static function (array $row): array {
+            return [
+                'id'               => (int) $row['id'],
+                'slug'             => (string) $row['slug'],
+                'normal_url'       => (string) $row['normal_url'],
+                'has_custom_alias' => (bool) $row['has_custom_alias'],
+                'title'            => (string) $row['title'],
+                'channel'          => (string) $row['channel'],
+                'campaign'         => (string) $row['campaign'],
+                'subcampaign'      => (string) $row['subcampaign'],
+                'destination_type' => (string) $row['destination_type'],
+                'destination_url'  => $row['destination_url'],
+                'whatsapp_phone'   => $row['whatsapp_phone'],
+                'whatsapp_message' => $row['whatsapp_message'],
+                'is_master_route'  => (bool) $row['is_master_route'],
+                'total_clicks'     => (int) $row['total_clicks'],
+                'unique_visitors'  => (int) $row['unique_visitors'],
+                'created_at'       => (string) $row['created_at'],
+            ];
+        }, $rawLinks);
 
-        // Agrupar eventos reales por Canal -> Campaña (Origen) -> Subcampaña
+        $waStmt = $pdo->query('SELECT * FROM whatsapp_numbers WHERE is_active = 1 ORDER BY id ASC');
+        $rawWa = $waStmt->fetchAll();
+        $waNumbers = array_map(static function (array $row): array {
+            return [
+                'id'               => (int) $row['id'],
+                'label'            => (string) $row['label'],
+                'phone_number'     => (string) $row['phone_number'],
+                'department'       => (string) $row['department'],
+                'default_greeting' => (string) $row['default_greeting'],
+            ];
+        }, $rawWa);
+
+        // Agrupar eventos reales en click_events + incluir subcampañas de links creados (aunque tengan 0 clics aún)
         $recordsStmt = $pdo->query("
             SELECT 
-                CONCAT(channel, '-', campaign, '-', subcampaign) AS id,
+                CONCAT(channel, '::', campaign, '::', subcampaign) AS id,
                 channel,
                 campaign,
                 subcampaign,
@@ -75,20 +107,63 @@ try {
             GROUP BY channel, campaign, subcampaign
             ORDER BY clicks DESC
         ");
+        $rawRecords = $recordsStmt->fetchAll();
+        $recordsMap = [];
+        foreach ($rawRecords as $r) {
+            $key = $r['id'];
+            $recordsMap[$key] = [
+                'id'                 => (string) $r['id'],
+                'channel'            => (string) $r['channel'],
+                'campaign'           => (string) $r['campaign'],
+                'subcampaign'        => (string) $r['subcampaign'],
+                'url_reference'      => $r['url_reference'] ?: null,
+                'short_link'         => (string) $r['short_link'],
+                'clicks'             => (int) $r['clicks'],
+                'unique_visitors'    => (int) $r['unique_visitors'],
+                'last_activity_date' => (string) ($r['last_activity_date'] ?: date('Y-m-d')),
+            ];
+        }
+
+        // Asegurar que los enlaces creados por el usuario también aparezcan en la reportería aunque aún tengan 0 clics
+        foreach ($links as $l) {
+            if ($l['is_master_route']) {
+                continue;
+            }
+            $key = $l['channel'] . '::' . $l['campaign'] . '::' . $l['subcampaign'];
+            if (!isset($recordsMap[$key])) {
+                $recordsMap[$key] = [
+                    'id'                 => $key,
+                    'channel'            => $l['channel'],
+                    'campaign'           => $l['campaign'],
+                    'subcampaign'        => $l['subcampaign'],
+                    'url_reference'      => null,
+                    'short_link'         => 'trace.icontinental.edu.pe/' . $l['slug'],
+                    'clicks'             => (int) $l['total_clicks'],
+                    'unique_visitors'    => (int) $l['unique_visitors'],
+                    'last_activity_date' => $l['created_at'],
+                ];
+            }
+        }
 
         jsonResponse([
-            'links'            => $linksStmt->fetchAll(),
-            'whatsapp_numbers' => $waStmt->fetchAll(),
-            'records'          => $recordsStmt->fetchAll(),
+            'links'            => $links,
+            'whatsapp_numbers' => $waNumbers,
+            'records'          => array_values($recordsMap),
         ]);
     }
 
-    // Crear nuevo enlace desde el Generador Unificado
+    // Crear nuevo enlace en MySQL
     if ($endpoint === 'links' && $method === 'POST') {
         $body = getJsonBody();
         $slug = trim($body['slug'] ?? '');
         if ($slug === '') {
             jsonResponse(['error' => 'Identificador de enlace inválido.'], 400);
+        }
+
+        $check = $pdo->prepare('SELECT id FROM links WHERE LOWER(slug) = LOWER(:slug) LIMIT 1');
+        $check->execute(['slug' => $slug]);
+        if ($check->fetch()) {
+            jsonResponse(['error' => "Ya existe un enlace con el identificador /{$slug}"], 409);
         }
 
         $stmt = $pdo->prepare("
@@ -160,6 +235,48 @@ try {
         $id = (int) $m[1];
         $pdo->prepare('DELETE FROM whatsapp_numbers WHERE id = :id')->execute(['id' => $id]);
         jsonResponse(['deleted' => true]);
+    }
+
+    if ($endpoint === 'simulate-click' && $method === 'POST') {
+        $body = getJsonBody();
+        $isBot = !empty($body['is_bot']);
+        if ($isBot) {
+            jsonResponse([
+                'counted' => false,
+                'message' => 'Vista previa de Bot (WhatsApp/Redes) detectada y bloqueada. No alteró el conteo de clics.',
+            ]);
+        }
+
+        $channel = (string) ($body['channel'] ?? 'web_institucional');
+        $campaign = (string) ($body['campaign'] ?? '202710');
+        $subcampaign = (string) ($body['subcampaign'] ?? 'General');
+        $urlRef = $body['url_reference'] ?? null;
+        $shortLink = (string) ($body['short_link'] ?? 'trace.icontinental.edu.pe/whatsapp-web');
+
+        $stmt = $pdo->prepare("
+            INSERT INTO click_events (
+                link_id, channel, campaign, subcampaign,
+                url_reference, short_link, visitor_hash,
+                is_unique, is_bot, user_agent, clicked_date
+            ) VALUES (
+                NULL, :ch, :camp, :sub,
+                :url_ref, :short_link, :vhash,
+                1, 0, 'TraceIC-Simulator/1.0', CURRENT_DATE
+            )
+        ");
+        $stmt->execute([
+            'ch'         => $channel,
+            'camp'       => $campaign,
+            'sub'        => $subcampaign,
+            'url_ref'    => $urlRef,
+            'short_link' => $shortLink,
+            'vhash'      => hash('sha256', uniqid('sim_', true)),
+        ]);
+
+        jsonResponse([
+            'counted' => true,
+            'message' => "+1 clic real registrado en MySQL para [{$campaign}] → {$subcampaign}.",
+        ]);
     }
 
     jsonResponse(['error' => 'Endpoint no encontrado'], 404);

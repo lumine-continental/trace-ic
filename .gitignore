@@ -6,6 +6,7 @@ frontend/dist/
 # Credenciales reales de producción (nunca subir a GitHub)
 backend/api/config.php
 deploy-cpanel/api/config.php
+deploy-cpanel.zip
 .env
 .env.*
 
