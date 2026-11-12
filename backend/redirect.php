@@ -186,26 +186,53 @@ try {
         $finalDestinationUrl = $link['destination_url'] ?: $fallbackUrl;
     }
 
-    $insertStmt = $pdo->prepare("
-        INSERT INTO click_events (
-            link_id, clicked_at, clicked_date, is_bot, is_unique, visitor_hash,
-            channel, campaign, subcampaign, url_reference, short_link
-        ) VALUES (
-            :link_id, NOW(), CURRENT_DATE, :is_bot, :is_unique, :visitor_hash,
-            :channel, :campaign, :subcampaign, :url_reference, :short_link
-        )
-    ");
-    $insertStmt->execute([
-        'link_id'       => $link['id'],
-        'is_bot'        => $isBot ? 1 : 0,
-        'is_unique'     => $isUnique,
-        'visitor_hash'  => $visitorHash,
-        'channel'       => $link['channel'],
-        'campaign'      => $finalCampaign,
-        'subcampaign'   => $finalSubcampaign,
-        'url_reference' => $urlReference,
-        'short_link'    => $shortLinkDisplay,
-    ]);
+    $isPurgeableEvent = (!empty($link['is_purgeable']) || !empty($_GET['test']) || preg_match('/prueba|test|demo|simulaci/i', $finalSubcampaign)) ? 1 : 0;
+
+    try {
+        $insertStmt = $pdo->prepare("
+            INSERT INTO click_events (
+                link_id, clicked_at, clicked_date, is_bot, is_unique, visitor_hash,
+                channel, campaign, subcampaign, url_reference, short_link, is_purgeable
+            ) VALUES (
+                :link_id, NOW(), CURRENT_DATE, :is_bot, :is_unique, :visitor_hash,
+                :channel, :campaign, :subcampaign, :url_reference, :short_link, :is_purgeable
+            )
+        ");
+        $insertStmt->execute([
+            'link_id'       => $link['id'],
+            'is_bot'        => $isBot ? 1 : 0,
+            'is_unique'     => $isUnique,
+            'visitor_hash'  => $visitorHash,
+            'channel'       => $link['channel'],
+            'campaign'      => $finalCampaign,
+            'subcampaign'   => $finalSubcampaign,
+            'url_reference' => $urlReference,
+            'short_link'    => $shortLinkDisplay,
+            'is_purgeable'  => $isPurgeableEvent,
+        ]);
+    } catch (\Throwable $colErr) {
+        // Fallback por si aún no se ejecutó la auto-migración de is_purgeable
+        $insertStmt = $pdo->prepare("
+            INSERT INTO click_events (
+                link_id, clicked_at, clicked_date, is_bot, is_unique, visitor_hash,
+                channel, campaign, subcampaign, url_reference, short_link
+            ) VALUES (
+                :link_id, NOW(), CURRENT_DATE, :is_bot, :is_unique, :visitor_hash,
+                :channel, :campaign, :subcampaign, :url_reference, :short_link
+            )
+        ");
+        $insertStmt->execute([
+            'link_id'       => $link['id'],
+            'is_bot'        => $isBot ? 1 : 0,
+            'is_unique'     => $isUnique,
+            'visitor_hash'  => $visitorHash,
+            'channel'       => $link['channel'],
+            'campaign'      => $finalCampaign,
+            'subcampaign'   => $finalSubcampaign,
+            'url_reference' => $urlReference,
+            'short_link'    => $shortLinkDisplay,
+        ]);
+    }
 
     $updateStmt = $pdo->prepare("
         UPDATE links SET

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   BarChart3,
   Calendar,
   Check,
@@ -8,10 +9,13 @@ import {
   Copy,
   Download,
   Edit3,
-  ExternalLink,
+  FilterX,
+  FlaskConical,
   Globe,
   Link2,
+  Lock,
   LogOut,
+  Mail,
   MessageSquare,
   Phone,
   Play,
@@ -21,7 +25,9 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 import {
   CAMPAIGN_ORIGINS,
@@ -44,14 +50,25 @@ type DatePreset =
   | 'custom'
   | 'all';
 
+const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v1';
+
 export const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  // El proyecto es público excepto en el módulo 02 (Generador de Enlaces)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTH_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [loginEmail, setLoginEmail] = useState('admin@icontinental.edu.pe');
-  const [loginPassword, setLoginPassword] = useState('TraceIC2026!');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
 
   const [activeModule, setActiveModule] = useState<MainModule>('reports');
 
-  // Datos sincronizados
+  // Datos sincronizados con MySQL / Local
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [records, setRecords] = useState<SubcampaignRecord[]>([]);
   const [waNumbers, setWaNumbers] = useState<WhatsAppNumberItem[]>([]);
@@ -68,6 +85,24 @@ export const App: React.FC = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ===========================================================================
+  // ESTADOS DEL MODAL / HERRAMIENTA DE DEPURACIÓN DE CONTEOS Y PRUEBAS
+  // ===========================================================================
+  const [isPurgeModalOpen, setIsPurgeModalOpen] = useState<boolean>(false);
+  const [purgeStartDate, setPurgeStartDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [purgeEndDate, setPurgeEndDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [purgeMode, setPurgeMode] = useState<'purgeable_only' | 'specific_target'>(
+    'purgeable_only'
+  );
+  const [purgeTargetId, setPurgeTargetId] = useState<string>('');
+  const [purgeRemoveEmpty, setPurgeRemoveEmpty] = useState<boolean>(true);
+  const [purgeFeedback, setPurgeFeedback] = useState<string | null>(null);
+  const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
+
+  // ===========================================================================
   // ESTADOS DEL GENERADOR DE ENLACES
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('mailing_sms_chattigo');
@@ -82,6 +117,8 @@ export const App: React.FC = () => {
   // Decisión de alias corto DESPUÉS de ver el enlace normal
   const [useShortAlias, setUseShortAlias] = useState<boolean>(false);
   const [customSlug, setCustomSlug] = useState<string>('');
+  // Checkbox para permitir si el enlace será depurable (de prueba)
+  const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
   const [genTitle, setGenTitle] = useState<string>('');
   const [genFeedbackUrl, setGenFeedbackUrl] = useState<string | null>(null);
   const [linkSearch, setLinkSearch] = useState<string>('');
@@ -110,6 +147,9 @@ export const App: React.FC = () => {
   const [simIsBot, setSimIsBot] = useState<boolean>(false);
   const [simFeedback, setSimFeedback] = useState<string | null>(null);
 
+  const isTestRecord = (r: SubcampaignRecord) =>
+    Boolean(r.is_purgeable) || /prueba|test|demo|simulaci/i.test(r.subcampaign);
+
   const refreshLocalState = () => {
     const loadedLinks = DataEngine.getLinks();
     const loadedRecords = DataEngine.getRecords();
@@ -120,6 +160,10 @@ export const App: React.FC = () => {
 
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
       setSimRecordId(loadedRecords[0].id);
+    }
+    if (loadedRecords.length > 0 && !purgeTargetId) {
+      const firstTest = loadedRecords.find((r) => isTestRecord(r));
+      setPurgeTargetId(firstTest ? firstTest.id : loadedRecords[0].id);
     }
 
     const exp: Record<string, boolean> = {};
@@ -146,6 +190,36 @@ export const App: React.FC = () => {
     setQrPngUrl(renderQrPngDataUrl(target, qrColor, 600, 2));
     setQrSvgText(renderQrSvg(target, qrColor, 2));
   }, [qrSelectedUrl, qrColor]);
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setLoginLoading(true);
+    const res = await DataEngine.login(loginEmail, loginPassword);
+    setLoginLoading(false);
+    if (res.ok) {
+      setIsAuthenticated(true);
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, '1');
+      } catch {
+        // ignore
+      }
+    } else {
+      setLoginError(res.error || 'Credenciales incorrectas.');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    if (activeModule === 'generator') {
+      setActiveModule('reports');
+    }
+  };
 
   const applyDatePreset = (preset: DatePreset) => {
     setDatePreset(preset);
@@ -183,6 +257,50 @@ export const App: React.FC = () => {
     }
   };
 
+  const applyPurgeDatePreset = (preset: 'today' | 'last_7_days' | 'all') => {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const todayStr = fmt(now);
+    if (preset === 'today') {
+      setPurgeStartDate(todayStr);
+      setPurgeEndDate(todayStr);
+    } else if (preset === 'last_7_days') {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 7);
+      setPurgeStartDate(fmt(start));
+      setPurgeEndDate(todayStr);
+    } else {
+      setPurgeStartDate('2025-01-01');
+      setPurgeEndDate('2029-12-31');
+    }
+  };
+
+  const openQuickPurgeForRecord = (rec: SubcampaignRecord) => {
+    setPurgeMode('specific_target');
+    setPurgeTargetId(rec.id);
+    setPurgeStartDate('2025-01-01');
+    setPurgeEndDate('2029-12-31');
+    setPurgeRemoveEmpty(true);
+    setPurgeFeedback(null);
+    setIsPurgeModalOpen(true);
+  };
+
+  const handleExecutePurge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPurgeLoading(true);
+    setPurgeFeedback(null);
+    const result = await DataEngine.purgeCounts({
+      startDate: purgeStartDate,
+      endDate: purgeEndDate,
+      mode: purgeMode,
+      targetId: purgeMode === 'specific_target' ? purgeTargetId : undefined,
+      removeEmptyLinks: purgeRemoveEmpty,
+    });
+    setPurgeLoading(false);
+    setPurgeFeedback(result.message);
+    loadData();
+  };
+
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -213,6 +331,10 @@ export const App: React.FC = () => {
       return matchDate && matchCampaign;
     });
   }, [records, startDate, endDate, reportCampaignFilter]);
+
+  const purgeableRecordsCount = useMemo(() => {
+    return records.filter((r) => isTestRecord(r)).length;
+  }, [records]);
 
   const channelTotals = useMemo(() => {
     const map: Record<ChannelKey, { clicks: number; unique: number }> = {
@@ -303,6 +425,7 @@ export const App: React.FC = () => {
       'Enlace_o_URL_Origen',
       'Clics_Totales',
       'Personas_Unicas',
+      'Es_Depurable_Prueba',
       'Fecha_Actividad',
     ];
     const rows = filteredRecords.map((r) => [
@@ -312,6 +435,7 @@ export const App: React.FC = () => {
       `"${r.url_reference || `https://${r.short_link}`}"`,
       r.clicks,
       r.unique_visitors,
+      isTestRecord(r) ? 'SI' : 'NO',
       r.last_activity_date,
     ]);
     const csv = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -344,6 +468,7 @@ export const App: React.FC = () => {
         destination_url: genDestType === 'url' ? genDestUrl.trim() : undefined,
         whatsapp_phone: genDestType === 'whatsapp' ? genWaPhone : undefined,
         whatsapp_message: genDestType === 'whatsapp' ? genWaMessage.trim() : undefined,
+        is_purgeable: genIsPurgeable,
       });
 
       const finalUrl = `https://trace.icontinental.edu.pe/${created.slug}`;
@@ -373,60 +498,180 @@ export const App: React.FC = () => {
     loadData();
   };
 
-  if (!isAuthenticated) {
+  // ===========================================================================
+  // PANTALLA DE LOGIN SPLIT-SCREEN (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
+  // Se solicita ÚNICAMENTE cuando se intenta acceder a "02. Generador de Enlaces"
+  // ===========================================================================
+  if (activeModule === 'generator' && !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center p-6">
-        <div className="bg-white border border-ic-border w-full max-w-md p-10">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-1.5 h-8 bg-ic-red" />
-            <div>
-              <h1 className="text-2xl font-serif font-bold text-ic-dark tracking-tight">
-                TRACE IC
-              </h1>
-              <p className="text-xs text-ic-muted uppercase tracking-widest mt-0.5">
-                Instituto Continental
-              </p>
+      <div className="min-h-screen w-full flex bg-white text-ic-dark">
+        {/* MITAD IZQUIERDA (50%): Imagen Editorial + Identidad Instituto Continental */}
+        <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B0F17] text-white overflow-hidden flex-col justify-between p-14">
+          {/* Fotografía de fondo con tratamiento editorial oscuro y acento Rojo Continental */}
+          <img
+            src="https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&w=1600&q=85"
+            alt="Campus Instituto Continental"
+            className="absolute inset-0 w-full h-full object-cover opacity-35 scale-105"
+          />
+          <div className="absolute inset-0 bg-gradient-to-tr from-[#0B0F17] via-[#0B0F17]/80 to-[#E4000B]/30" />
+          <div className="absolute top-0 left-0 w-2 h-full bg-ic-red" />
+
+          {/* Cabecera Izquierda */}
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-7 bg-ic-red" />
+              <div>
+                <div className="font-serif font-bold text-xl tracking-tight text-white">
+                  TRACE IC
+                </div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-gray-300">
+                  Instituto Continental
+                </div>
+              </div>
+            </div>
+            <span className="px-3 py-1 text-[11px] font-mono bg-white/10 backdrop-blur-sm border border-white/15 text-white">
+              trace.icontinental.edu.pe
+            </span>
+          </div>
+
+          {/* Mensaje Central Editorial */}
+          <div className="relative z-10 max-w-lg space-y-6 my-auto">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-ic-red text-white text-[11px] font-semibold uppercase tracking-widest">
+              <Sparkles className="w-3.5 h-3.5" />
+              Plataforma de Atribución Digital
+            </div>
+
+            <h2 className="text-4xl xl:text-5xl font-serif font-bold leading-tight text-white">
+              Trazabilidad precisa para cada campaña y carrera.
+            </h2>
+
+            <p className="text-sm text-gray-300 leading-relaxed">
+              Gestiona enlaces inteligentes para Mailing, SMS, Chattigo (<code className="text-white font-mono">/CRM</code>),
+              TikTok Ads y el Sitio Web Institucional con autodetección de carreras y filtrado automático de bots.
+            </p>
+
+            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/15">
+              <div>
+                <div className="text-xs font-mono text-ic-red font-bold">CANAL /CRM</div>
+                <div className="text-xs text-gray-300 mt-0.5">Mailing, SMS y Chattigo</div>
+              </div>
+              <div>
+                <div className="text-xs font-mono text-ic-red font-bold">/CARRERA/...</div>
+                <div className="text-xs text-gray-300 mt-0.5">Autodetección Web</div>
+              </div>
+              <div>
+                <div className="text-xs font-mono text-ic-red font-bold">202710–202930</div>
+                <div className="text-xs text-gray-300 mt-0.5">Control por Campaña</div>
+              </div>
             </div>
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setIsAuthenticated(true);
-            }}
-            className="space-y-5"
-          >
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                Usuario Administrador
-              </label>
-              <input
-                type="email"
-                required
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs border border-ic-border focus:outline-none focus:border-ic-dark"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                Contraseña
-              </label>
-              <input
-                type="password"
-                required
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs border border-ic-border focus:outline-none focus:border-ic-dark"
-              />
-            </div>
+          {/* Pie Izquierdo */}
+          <div className="relative z-10 flex items-center justify-between text-xs text-gray-400 border-t border-white/10 pt-6">
+            <span>© Instituto Continental • Ecosistema de Marketing</span>
+            <span className="font-mono text-[11px] text-gray-300">Módulo 02 Protegido</span>
+          </div>
+        </div>
+
+        {/* MITAD DERECHA (50%): Formulario de Login Centrado */}
+        <div className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 xl:p-16 bg-white">
+          {/* Barra superior para regresar a los módulos públicos */}
+          <div className="flex items-center justify-between">
             <button
-              type="submit"
-              className="w-full py-3 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider transition-colors"
+              type="button"
+              onClick={() => setActiveModule('reports')}
+              className="inline-flex items-center gap-2 text-xs font-semibold text-ic-muted hover:text-ic-dark transition-colors"
             >
-              Acceder a la Plataforma
+              <ArrowLeft className="w-4 h-4 text-ic-red" />
+              Volver a Reportería Pública
             </button>
-          </form>
+
+            <span className="text-[11px] font-mono text-ic-muted">
+              Reportería abierta • Generador con acceso
+            </span>
+          </div>
+
+          {/* Contenedor Centrado en la Mitad Derecha */}
+          <div className="w-full max-w-md mx-auto my-auto py-8 space-y-8">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-ic-redSoft text-ic-red text-[11px] font-semibold uppercase tracking-wider">
+                <Lock className="w-3.5 h-3.5" />
+                Módulo 02 • Generador de Enlaces
+              </div>
+              <h1 className="text-3xl sm:text-4xl font-serif font-bold text-ic-dark tracking-tight">
+                Iniciar Sesión
+              </h1>
+              <p className="text-xs text-ic-muted leading-relaxed">
+                La reportería general es de acceso público para el equipo. Ingresa tus credenciales de administrador para crear, configurar o eliminar enlaces de campaña.
+              </p>
+            </div>
+
+            {loginError && (
+              <div className="p-3.5 bg-red-50 border-l-2 border-l-ic-red border border-red-200 text-xs text-red-900 font-medium">
+                {loginError}
+              </div>
+            )}
+
+            <form onSubmit={handleLoginSubmit} className="space-y-5">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-2">
+                  Correo Institucional
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-ic-muted absolute left-3.5 top-3" />
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="admin@icontinental.edu.pe"
+                    className="w-full pl-10 pr-4 py-2.5 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-2">
+                  Contraseña de Administrador
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-ic-muted absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full pl-10 pr-4 py-2.5 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark transition-colors"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full py-3.5 bg-ic-red hover:bg-ic-redHover disabled:opacity-60 text-white text-xs font-semibold uppercase tracking-wider transition-colors shadow-sm"
+              >
+                {loginLoading ? 'Verificando acceso...' : 'Acceder al Generador de Enlaces'}
+              </button>
+            </form>
+
+            <div className="pt-6 border-t border-ic-border flex items-center justify-between text-xs text-ic-muted">
+              <span>¿Solo deseas consultar métricas?</span>
+              <button
+                type="button"
+                onClick={() => setActiveModule('reports')}
+                className="text-ic-red font-semibold hover:underline"
+              >
+                Ir a 01. Reportería →
+              </button>
+            </div>
+          </div>
+
+          {/* Pie Derecho */}
+          <div className="text-center lg:text-left text-[11px] text-ic-muted">
+            Trace IC • Acceso exclusivo para creación de enlaces de campañas
+          </div>
         </div>
       </div>
     );
@@ -484,6 +729,9 @@ export const App: React.FC = () => {
                 }`}
               />
               <span>02. Generador de Enlaces</span>
+              {!isAuthenticated && (
+                <Lock className="w-3 h-3 text-ic-muted ml-0.5" title="Requiere iniciar sesión" />
+              )}
             </button>
 
             <button
@@ -503,53 +751,274 @@ export const App: React.FC = () => {
             </button>
           </nav>
 
-          {/* Acciones de Sesión */}
+          {/* Acciones de Sincronización y Sesión */}
           <div className="flex items-center gap-2">
             <button
               onClick={loadData}
               className="p-2 text-ic-muted hover:text-ic-dark border border-ic-border bg-white"
-              title="Actualizar datos"
+              title="Actualizar datos desde MySQL"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => setIsAuthenticated(false)}
-              className="p-2 text-ic-muted hover:text-ic-red"
-              title="Cerrar sesión"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            {isAuthenticated ? (
+              <button
+                onClick={handleLogout}
+                className="px-2.5 py-1.5 text-xs text-ic-muted hover:text-ic-red border border-ic-border bg-white flex items-center gap-1.5"
+                title="Cerrar sesión de administrador"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Salir</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setActiveModule('generator')}
+                className="px-2.5 py-1.5 text-xs text-ic-dark hover:text-ic-red border border-ic-border bg-white flex items-center gap-1.5"
+                title="Iniciar sesión para el Generador de Enlaces"
+              >
+                <Lock className="w-3.5 h-3.5 text-ic-red" />
+                <span className="hidden md:inline">Acceso Generador</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
+
+      {/* =====================================================================
+          MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS (POR RANGO DE FECHAS)
+         ===================================================================== */}
+      {isPurgeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="bg-white border border-ic-border w-full max-w-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between bg-[#FAFAFA]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-1.5 h-5 bg-ic-red" />
+                <div>
+                  <h3 className="text-base font-serif font-bold text-ic-dark">
+                    Depurar Conteos de Prueba por Fecha
+                  </h3>
+                  <p className="text-[11px] text-ic-muted">
+                    Limpia clics de prueba (como <code className="font-mono">prueba-cpanel</code>) o enlaces marcados como depurables.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPurgeModalOpen(false)}
+                className="p-1 text-ic-muted hover:text-ic-dark"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecutePurge} className="p-6 space-y-5">
+              {/* 1. RANGO DE FECHAS A DEPURAR */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                    1. Rango de Fechas a Limpiar
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => applyPurgeDatePreset('today')}
+                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyPurgeDatePreset('last_7_days')}
+                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
+                    >
+                      Últimos 7 días
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyPurgeDatePreset('all')}
+                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
+                    >
+                      Todo el historial
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 p-3 bg-[#FAFAFA] border border-ic-border">
+                  <div>
+                    <span className="block text-[11px] text-ic-muted mb-1">Desde:</span>
+                    <input
+                      type="date"
+                      required
+                      value={purgeStartDate}
+                      onChange={(e) => setPurgeStartDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
+                    />
+                  </div>
+                  <div>
+                    <span className="block text-[11px] text-ic-muted mb-1">Hasta:</span>
+                    <input
+                      type="date"
+                      required
+                      value={purgeEndDate}
+                      onChange={(e) => setPurgeEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. MODO DE DEPURACIÓN */}
+              <div className="space-y-2.5">
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                  2. ¿Qué conteos deseas depurar?
+                </label>
+
+                <label
+                  className={`flex items-start gap-2.5 p-3 border cursor-pointer ${
+                    purgeMode === 'purgeable_only'
+                      ? 'border-ic-red bg-ic-redSoft/40'
+                      : 'border-ic-border bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="purgeMode"
+                    checked={purgeMode === 'purgeable_only'}
+                    onChange={() => setPurgeMode('purgeable_only')}
+                    className="mt-0.5 accent-ic-red"
+                  />
+                  <div className="text-xs">
+                    <div className="font-semibold text-ic-dark">
+                      Todos los enlaces "Depurables" y pruebas automáticas
+                    </div>
+                    <div className="text-[11px] text-ic-muted mt-0.5">
+                      Limpia enlaces creados con el check <em>Depurable</em>, pruebas del simulador y subcampañas de test (ej. <code className="font-mono">prueba-cpanel</code>).
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className={`flex items-start gap-2.5 p-3 border cursor-pointer ${
+                    purgeMode === 'specific_target'
+                      ? 'border-ic-red bg-ic-redSoft/40'
+                      : 'border-ic-border bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="purgeMode"
+                    checked={purgeMode === 'specific_target'}
+                    onChange={() => setPurgeMode('specific_target')}
+                    className="mt-0.5 accent-ic-red"
+                  />
+                  <div className="text-xs flex-1">
+                    <div className="font-semibold text-ic-dark">
+                      Seleccionar una subcampaña o prueba específica
+                    </div>
+                    {purgeMode === 'specific_target' && (
+                      <select
+                        value={purgeTargetId}
+                        onChange={(e) => setPurgeTargetId(e.target.value)}
+                        className="mt-2 w-full px-2.5 py-2 text-xs border border-ic-border bg-white font-mono"
+                      >
+                        {records.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {isTestRecord(r) ? '[PRUEBA] ' : ''}[{r.campaign}] {CHANNEL_LABELS[r.channel]} → {r.subcampaign} ({r.clicks} clics)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </label>
+              </div>
+
+              {/* 3. OPCIÓN DE ELIMINAR REGISTRO SI QUEDA EN CERO */}
+              <label className="flex items-center gap-2 text-xs text-ic-dark cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={purgeRemoveEmpty}
+                  onChange={(e) => setPurgeRemoveEmpty(e.target.checked)}
+                  className="accent-ic-red"
+                />
+                <span>
+                  Eliminar también el registro de prueba de la tabla si queda con <strong>0 clics</strong>
+                </span>
+              </label>
+
+              {purgeFeedback && (
+                <div className="p-3 bg-green-50 border border-green-200 text-xs text-green-900 font-medium">
+                  {purgeFeedback}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-ic-border">
+                <button
+                  type="button"
+                  onClick={() => setIsPurgeModalOpen(false)}
+                  className="px-4 py-2 border border-ic-border bg-white text-xs font-medium text-ic-dark hover:bg-gray-50"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="submit"
+                  disabled={purgeLoading}
+                  className="px-4 py-2 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5"
+                >
+                  <FilterX className="w-3.5 h-3.5" />
+                  {purgeLoading ? 'Depurando...' : 'Depurar Conteos Ahora'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* =====================================================================
           CONTENIDO PRINCIPAL
          ===================================================================== */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-8">
         {/* ===================================================================
-            MÓDULO 01: REPORTERÍA Y CONTEOS
+            MÓDULO 01: REPORTERÍA Y CONTEOS (PÚBLICO)
            =================================================================== */}
         {activeModule === 'reports' && (
           <>
-            {/* Encabezado + Único botón Exportar CSV */}
+            {/* Encabezado + Botones Depurar Pruebas y Exportar CSV */}
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-ic-border pb-5">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
-                  Módulo 01 • Reportería de Marketing
+                  Módulo 01 • Reportería de Marketing (Consulta Pública)
                 </div>
                 <h1 className="text-3xl font-serif font-bold text-ic-dark">
                   Conteo General por Canal, Campaña y Subcampaña
                 </h1>
               </div>
 
-              <button
-                onClick={handleExportReportCsv}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-ic-dark hover:bg-black text-white text-xs font-medium tracking-wide transition-colors self-start sm:self-auto"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Exportar Reporte CSV
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPurgeFeedback(null);
+                    setIsPurgeModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-ic-redSoft border border-ic-border text-ic-dark text-xs font-medium tracking-wide transition-colors"
+                >
+                  <FilterX className="w-3.5 h-3.5 text-ic-red" />
+                  <span>Depurar Pruebas</span>
+                  {purgeableRecordsCount > 0 && (
+                    <span className="px-1.5 py-0.2 bg-ic-red text-white text-[10px] font-mono font-bold">
+                      {purgeableRecordsCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportReportCsv}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-ic-dark hover:bg-black text-white text-xs font-medium tracking-wide transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Exportar Reporte CSV
+                </button>
+              </div>
             </div>
 
             {/* BARRA DE FILTROS DE FECHA (CON CALENDARIO Y ATAJOS) Y CAMPAÑA (ORIGEN) */}
@@ -795,9 +1264,9 @@ export const App: React.FC = () => {
                                           : 'Subcampaña'}
                                       </th>
                                       <th className="py-2 px-4">Enlace / URL Origen</th>
-                                      <th className="py-2 px-4 w-44">Proporción</th>
+                                      <th className="py-2 px-4 w-40">Proporción</th>
                                       <th className="py-2 px-4 text-right">Clics</th>
-                                      <th className="py-2 pr-6 pl-4 text-right w-28">Únicos</th>
+                                      <th className="py-2 pr-6 pl-4 text-right w-32">Únicos / Acción</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 text-xs">
@@ -805,10 +1274,18 @@ export const App: React.FC = () => {
                                       const pct = Math.round(
                                         (sub.clicks / Math.max(1, camp.clicks)) * 100
                                       );
+                                      const isPurgeableSub = isTestRecord(sub);
                                       return (
                                         <tr key={sub.id} className="hover:bg-gray-50/80">
                                           <td className="py-2.5 pl-12 pr-4 font-medium text-ic-dark">
-                                            {sub.subcampaign}
+                                            <div className="flex items-center gap-2">
+                                              <span>{sub.subcampaign}</span>
+                                              {isPurgeableSub && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                                  DEPURABLE / PRUEBA
+                                                </span>
+                                              )}
+                                            </div>
                                           </td>
                                           <td className="py-2.5 px-4 font-mono text-[11px] text-ic-muted">
                                             {sub.url_reference || sub.short_link}
@@ -830,7 +1307,19 @@ export const App: React.FC = () => {
                                             {sub.clicks.toLocaleString()}
                                           </td>
                                           <td className="py-2.5 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                                            {sub.unique_visitors.toLocaleString()}
+                                            <div className="inline-flex items-center justify-end gap-2">
+                                              <span>{sub.unique_visitors.toLocaleString()}</span>
+                                              {isPurgeableSub && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openQuickPurgeForRecord(sub)}
+                                                  className="px-1.5 py-0.5 text-[10px] font-medium text-ic-red hover:bg-ic-redSoft border border-ic-red/30"
+                                                  title="Depurar o eliminar este conteo de prueba"
+                                                >
+                                                  Limpiar
+                                                </button>
+                                              )}
+                                            </div>
                                           </td>
                                         </tr>
                                       );
@@ -903,9 +1392,9 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 02: GENERADOR DE ENLACES
+            MÓDULO 02: GENERADOR DE ENLACES (PROTEGIDO CON LOGIN)
            =================================================================== */}
-        {activeModule === 'generator' && (
+        {activeModule === 'generator' && isAuthenticated && (
           <div className="space-y-8">
             <div className="border-b border-ic-border pb-5">
               <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
@@ -915,7 +1404,7 @@ export const App: React.FC = () => {
                 Generador Unificado de Enlaces
               </h1>
               <p className="text-xs text-ic-muted mt-1">
-                Visualiza primero el resultado de tu enlace normal con parámetros (<code className="font-mono text-ic-dark">/CRM</code>, <code className="font-mono text-ic-dark">/tiktok</code>, etc.) y decide si deseas usar un alias corto.
+                Visualiza primero el resultado de tu enlace normal con parámetros (<code className="font-mono text-ic-dark">/CRM</code>, <code className="font-mono text-ic-dark">/tiktok</code>, etc.), decide si deseas usar un alias corto y marca si será un enlace depurable de prueba.
               </p>
             </div>
 
@@ -1078,8 +1567,8 @@ export const App: React.FC = () => {
                     )}
                   </div>
 
-                  {/* 5. RESULTADO DEL ENLACE NORMAL (VISIBLE ANTES DE DECIDIR SI SE USA ALIAS CORTO) */}
-                  <div className="p-4 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-2.5">
+                  {/* 5. RESULTADO DEL ENLACE NORMAL + CHECKBOX ALIAS CORTO + CHECKBOX DEPURABLE */}
+                  <div className="p-4 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
                         5. Resultado del Enlace Normal:
@@ -1149,6 +1638,27 @@ export const App: React.FC = () => {
                         </div>
                       </div>
                     )}
+
+                    {/* Checkbox para permitir si será un enlace depurable (de prueba) */}
+                    <div className="pt-3 border-t border-ic-border">
+                      <label className="flex items-start gap-2.5 text-xs text-ic-dark cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={genIsPurgeable}
+                          onChange={(e) => setGenIsPurgeable(e.target.checked)}
+                          className="mt-0.5 accent-ic-red"
+                        />
+                        <div>
+                          <span className="font-semibold flex items-center gap-1.5">
+                            <FlaskConical className="w-3.5 h-3.5 text-ic-red" />
+                            Permitir depurar conteos (Marcar como enlace de prueba / depurable)
+                          </span>
+                          <span className="block text-[11px] text-ic-muted mt-0.5">
+                            Si lo activas, podrás limpiar sus clics por rango de fechas cuando termines tus pruebas.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   <button
@@ -1229,6 +1739,11 @@ export const App: React.FC = () => {
                               <span className="text-xs font-semibold text-ic-dark">
                                 {link.subcampaign}
                               </span>
+                              {link.is_purgeable && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                  DEPURABLE
+                                </span>
+                              )}
                             </div>
 
                             <div className="font-mono text-xs font-bold text-ic-red break-all">
@@ -1241,11 +1756,31 @@ export const App: React.FC = () => {
                               </div>
                             )}
 
-                            <div className="text-xs text-ic-muted">
-                              {link.title} •{' '}
-                              <strong className="text-ic-dark tabular-nums">
-                                {link.total_clicks.toLocaleString()} clics
-                              </strong>
+                            <div className="text-xs text-ic-muted flex flex-wrap items-center gap-2">
+                              <span>
+                                {link.title} •{' '}
+                                <strong className="text-ic-dark tabular-nums">
+                                  {link.total_clicks.toLocaleString()} clics
+                                </strong>
+                              </span>
+                              {!link.is_master_route && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    DataEngine.togglePurgeable({
+                                      id: link.id,
+                                      targetId: `${link.channel}::${link.campaign}::${link.subcampaign}`,
+                                      isPurgeable: !link.is_purgeable,
+                                    });
+                                    loadData();
+                                  }}
+                                  className="text-[11px] text-ic-red hover:underline"
+                                >
+                                  {link.is_purgeable
+                                    ? 'Quitar marca depurable'
+                                    : 'Marcar como depurable'}
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -1300,17 +1835,31 @@ export const App: React.FC = () => {
 
         {/* ===================================================================
             MÓDULO 03: WHATSAPP Y HERRAMIENTAS AVANZADAS
-            (Configuración de Números WhatsApp + Generador QR + Simulador Anti-Bots)
+            (Configuración de Números WhatsApp + Generador QR + Simulador y Depurador)
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
-            <div className="border-b border-ic-border pb-5">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
-                Módulo 03 • Configuración y Utilidades
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-ic-border pb-5">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
+                  Módulo 03 • Configuración y Utilidades
+                </div>
+                <h1 className="text-3xl font-serif font-bold text-ic-dark">
+                  Números de WhatsApp, Códigos QR y Depurador de Pruebas
+                </h1>
               </div>
-              <h1 className="text-3xl font-serif font-bold text-ic-dark">
-                Números de WhatsApp, Códigos QR y Verificador de Tráfico
-              </h1>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPurgeFeedback(null);
+                  setIsPurgeModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider"
+              >
+                <FilterX className="w-3.5 h-3.5" />
+                Abrir Depurador por Fechas
+              </button>
             </div>
 
             {/* BLOQUE 1: CONFIGURACIÓN DE NÚMEROS DE WHATSAPP */}
@@ -1555,17 +2104,19 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Probador de Clics y Filtro Anti-Bots (de la versión anterior) */}
+              {/* Probador de Clics y Depurador Rápido */}
               <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
-                <div className="flex items-center gap-2 border-b border-ic-border pb-3">
-                  <ShieldCheck className="w-4 h-4 text-ic-red" />
-                  <div>
-                    <h2 className="text-base font-serif font-bold text-ic-dark">
-                      3. Simulador de Clics y Filtro Anti-Bots
-                    </h2>
-                    <p className="text-xs text-ic-muted">
-                      Prueba cómo el sistema suma clics humanos al instante y bloquea bots de vista previa de WhatsApp.
-                    </p>
+                <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-ic-red" />
+                    <div>
+                      <h2 className="text-base font-serif font-bold text-ic-dark">
+                        3. Simulador de Clics y Filtro Anti-Bots
+                      </h2>
+                      <p className="text-xs text-ic-muted">
+                        Los clics simulados se marcan automáticamente como depurables.
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -1597,7 +2148,7 @@ export const App: React.FC = () => {
                       className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
                     >
                       <option value="human">
-                        Persona Real (Suma +1 clic en la Reportería)
+                        Persona Real (Suma +1 clic de prueba en la Reportería)
                       </option>
                       <option value="bot">
                         Bot de Vista Previa de WhatsApp / Redes (Bloqueado por el filtro)
@@ -1605,24 +2156,44 @@ export const App: React.FC = () => {
                     </select>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const res = DataEngine.simulateTestClick({
-                        recordId: simRecordId,
-                        isBot: simIsBot,
-                      });
-                      setSimFeedback(res.message);
-                      loadData();
-                    }}
-                    className="w-full py-2.5 bg-ic-dark hover:bg-black text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    Ejecutar Prueba en Tiempo Real
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = DataEngine.simulateTestClick({
+                          recordId: simRecordId,
+                          isBot: simIsBot,
+                        });
+                        setSimFeedback(res.message);
+                        loadData();
+                      }}
+                      className="py-2.5 px-3 bg-ic-dark hover:bg-black text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Simular Clic
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPurgeFeedback(null);
+                        setIsPurgeModalOpen(true);
+                      }}
+                      className="py-2.5 px-3 bg-white hover:bg-ic-redSoft border border-ic-border text-ic-red text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
+                    >
+                      <FilterX className="w-3.5 h-3.5" />
+                      Depurar Pruebas
+                    </button>
+                  </div>
 
                   {simFeedback && (
-                    <div className="p-3 bg-[#FAFAFA] border border-ic-border text-xs font-medium text-ic-dark">
+                    <div
+                      className={`p-3 border text-xs ${
+                        simIsBot
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : 'bg-green-50 border-green-200 text-green-900'
+                      }`}
+                    >
                       {simFeedback}
                     </div>
                   )}

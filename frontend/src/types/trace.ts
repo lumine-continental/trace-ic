@@ -40,6 +40,7 @@ export interface LinkItem {
   whatsapp_phone: string | null;
   whatsapp_message: string | null;
   is_master_route?: boolean;
+  is_purgeable?: boolean; // Si el enlace permite depurar sus conteos (enlace de prueba)
   total_clicks: number;
   unique_visitors: number;
   created_at: string;
@@ -55,6 +56,7 @@ export interface SubcampaignRecord {
   clicks: number;
   unique_visitors: number;
   last_activity_date: string; // YYYY-MM-DD para el filtro de calendario
+  is_purgeable?: boolean; // Si esta subcampaña es depurable / de prueba
 }
 
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {

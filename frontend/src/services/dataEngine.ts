@@ -436,6 +436,42 @@ export class DataEngine {
     return loadFromStorage<WhatsAppNumberItem[]>(STORAGE_KEYS.WA_NUMBERS, INITIAL_WA_NUMBERS);
   }
 
+  static async login(
+    email: string,
+    password: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (res.ok) {
+        return { ok: true };
+      }
+      const errData = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        return {
+          ok: false,
+          error: errData.error || 'Credenciales incorrectas.',
+        };
+      }
+    } catch {
+      // Fallback en modo local (localhost:5173)
+    }
+
+    if (
+      email.trim().toLowerCase() === 'admin@icontinental.edu.pe' &&
+      password === 'TraceIC2026!'
+    ) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      error: 'Credenciales incorrectas. Verifica tu usuario y contraseña.',
+    };
+  }
+
   static createLink(payload: {
     title: string;
     useShortAlias: boolean;
@@ -447,6 +483,7 @@ export class DataEngine {
     destination_url?: string;
     whatsapp_phone?: string;
     whatsapp_message?: string;
+    is_purgeable?: boolean;
   }): LinkItem {
     const links = this.getLinks();
     const records = this.getRecords();
@@ -472,6 +509,7 @@ export class DataEngine {
     }
 
     const today = new Date().toISOString().slice(0, 10);
+    const isPurgeable = Boolean(payload.is_purgeable);
     const newLink: LinkItem = {
       id: Math.max(0, ...links.map((l) => l.id)) + 1,
       slug: finalSlug,
@@ -489,6 +527,7 @@ export class DataEngine {
         payload.destination_type === 'whatsapp'
           ? payload.whatsapp_message || 'Hola Instituto Continental, deseo recibir información.'
           : null,
+      is_purgeable: isPurgeable,
       total_clicks: 0,
       unique_visitors: 0,
       created_at: today,
@@ -503,6 +542,7 @@ export class DataEngine {
       clicks: 0,
       unique_visitors: 0,
       last_activity_date: today,
+      is_purgeable: isPurgeable,
     };
 
     saveToStorage(STORAGE_KEYS.LINKS, [newLink, ...links]);
@@ -517,6 +557,130 @@ export class DataEngine {
       .catch(() => {});
 
     return newLink;
+  }
+
+  static togglePurgeable(params: {
+    id?: number;
+    targetId?: string;
+    isPurgeable: boolean;
+  }): void {
+    const links = this.getLinks().map((l) => {
+      if (params.id && l.id === params.id) {
+        return { ...l, is_purgeable: params.isPurgeable };
+      }
+      if (
+        params.targetId &&
+        `${l.channel}::${l.campaign}::${l.subcampaign}` === params.targetId &&
+        !l.is_master_route
+      ) {
+        return { ...l, is_purgeable: params.isPurgeable };
+      }
+      return l;
+    });
+    saveToStorage(STORAGE_KEYS.LINKS, links);
+
+    const records = this.getRecords().map((r) => {
+      if (params.targetId && r.id === params.targetId) {
+        return { ...r, is_purgeable: params.isPurgeable };
+      }
+      return r;
+    });
+    saveToStorage(STORAGE_KEYS.RECORDS, records);
+
+    fetch('/api/links/toggle-purgeable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: params.id,
+        target_id: params.targetId,
+        is_purgeable: params.isPurgeable,
+      }),
+    })
+      .then(() => this.syncFromServer())
+      .catch(() => {});
+  }
+
+  static async purgeCounts(params: {
+    startDate: string;
+    endDate: string;
+    mode: 'purgeable_only' | 'specific_target';
+    targetId?: string;
+    removeEmptyLinks?: boolean;
+  }): Promise<{ purged_events: number; message: string }> {
+    try {
+      const res = await fetch('/api/purge-counts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: params.startDate,
+          end_date: params.endDate,
+          mode: params.mode,
+          target_id: params.targetId,
+          remove_empty_links: params.removeEmptyLinks,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await this.syncFromServer();
+        return {
+          purged_events: data.purged_events ?? 0,
+          message:
+            data.message ||
+            'Conteos depurados correctamente en la base de datos MySQL.',
+        };
+      }
+    } catch {
+      // Fallback local
+    }
+
+    const isTestPattern = (s: string) => /prueba|test|demo|simulaci/i.test(s);
+    let purgedCount = 0;
+    const records = this.getRecords();
+    const updatedRecords: SubcampaignRecord[] = [];
+
+    for (const r of records) {
+      const inRange =
+        r.last_activity_date >= params.startDate &&
+        r.last_activity_date <= params.endDate;
+      const matchesTarget =
+        params.mode === 'specific_target'
+          ? r.id === params.targetId
+          : Boolean(r.is_purgeable) || isTestPattern(r.subcampaign);
+
+      if (inRange && matchesTarget) {
+        purgedCount += r.clicks;
+        if (!params.removeEmptyLinks) {
+          updatedRecords.push({ ...r, clicks: 0, unique_visitors: 0 });
+        }
+      } else {
+        updatedRecords.push(r);
+      }
+    }
+    saveToStorage(STORAGE_KEYS.RECORDS, updatedRecords);
+
+    if (params.removeEmptyLinks) {
+      const filteredLinks = this.getLinks().filter((l) => {
+        if (l.is_master_route) return true;
+        const key = `${l.channel}::${l.campaign}::${l.subcampaign}`;
+        if (params.mode === 'specific_target' && key === params.targetId) {
+          return false;
+        }
+        if (params.mode === 'purgeable_only' && l.is_purgeable) {
+          return false;
+        }
+        return true;
+      });
+      saveToStorage(STORAGE_KEYS.LINKS, filteredLinks);
+    }
+
+    if (this.onSyncCallback) {
+      this.onSyncCallback();
+    }
+
+    return {
+      purged_events: purgedCount,
+      message: `Depuración completada: ${purgedCount} clics de prueba limpiados entre ${params.startDate} y ${params.endDate}.`,
+    };
   }
 
   static deleteLink(id: number): void {
