@@ -112,6 +112,35 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             ");
         }
 
+        // 4b. Tabla de Subcanales (Jerárquica: cada subcanal pertenece a un canal existente)
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `subchannels` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `channel` VARCHAR(50) NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uk_channel_subchannel` (`channel`, `name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+
+        if ((int) $pdo->query("SELECT COUNT(*) FROM `subchannels`")->fetchColumn() === 0) {
+            $pdo->exec("
+                INSERT IGNORE INTO `subchannels` (`channel`, `name`) VALUES
+                ('web_institucional', 'portal-web'),
+                ('web_institucional', 'landing-carreras'),
+                ('link_ads', 'tiktok-ads'),
+                ('link_ads', 'google-search'),
+                ('link_ads', 'google-display'),
+                ('link_ads', 'google-pmax'),
+                ('link_ads', 'google-youtube'),
+                ('link_ads', 'linkedin-ads'),
+                ('mailing_sms_chattigo', 'chattigo'),
+                ('mailing_sms_chattigo', 'sms'),
+                ('mailing_sms_chattigo', 'mailing')
+            ");
+        }
+
         // 5. Asegurar columnas en `links`
         $pdo->exec("ALTER TABLE `links` MODIFY COLUMN `channel` VARCHAR(50) NOT NULL DEFAULT 'mailing_sms_chattigo'");
         $pdo->exec("ALTER TABLE `click_events` MODIFY COLUMN `channel` VARCHAR(50) NOT NULL DEFAULT 'mailing_sms_chattigo'");
@@ -305,6 +334,16 @@ try {
             ];
         }, $careersRaw);
 
+        // 3b. Subcanales
+        $subchannelsRaw = $pdo->query("SELECT id, channel, name FROM subchannels ORDER BY channel ASC, id ASC")->fetchAll();
+        $subchannels = array_map(static function (array $row): array {
+            return [
+                'id'      => (int) $row['id'],
+                'channel' => (string) $row['channel'],
+                'name'    => (string) $row['name'],
+            ];
+        }, $subchannelsRaw);
+
         // 4. Asesores
         $advisorsRaw = $pdo->query("SELECT * FROM advisors WHERE is_active = 1 ORDER BY id ASC")->fetchAll();
         $advisors = array_map(static function (array $row): array {
@@ -443,6 +482,7 @@ try {
             'periods'          => $periods,
             'campaigns'        => $campaigns,
             'careers'          => $careers,
+            'subchannels'      => $subchannels,
             'advisors'         => $advisors,
             'whatsapp_numbers' => $waNumbers,
             'links'            => $links,
@@ -513,6 +553,28 @@ try {
         $body = getJsonBody();
         $id = (int) ($body['id'] ?? 0);
         $pdo->prepare('DELETE FROM careers WHERE id = :id')->execute(['id' => $id]);
+        jsonResponse(['deleted' => true]);
+    }
+
+    // =========================================================================
+    // GESTIÓN DE SUBCANALES POR CANAL (Jerárquico)
+    // =========================================================================
+    if ($endpoint === 'subchannels' && $method === 'POST') {
+        $body = getJsonBody();
+        $channel = trim((string) ($body['channel'] ?? 'link_ads'));
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '') {
+            jsonResponse(['error' => 'El nombre del subcanal es obligatorio.'], 400);
+        }
+        $stmt = $pdo->prepare('INSERT IGNORE INTO subchannels (channel, name) VALUES (:channel, :name)');
+        $stmt->execute(['channel' => $channel, 'name' => $name]);
+        jsonResponse(['id' => (int) $pdo->lastInsertId(), 'channel' => $channel, 'name' => $name], 201);
+    }
+
+    if ($endpoint === 'subchannels/delete' && $method === 'POST') {
+        $body = getJsonBody();
+        $id = (int) ($body['id'] ?? 0);
+        $pdo->prepare('DELETE FROM subchannels WHERE id = :id')->execute(['id' => $id]);
         jsonResponse(['deleted' => true]);
     }
 

@@ -140,7 +140,7 @@ try {
     $paramPeriod = trim($_GET['periodo'] ?? '');
     $paramCampaign = trim($_GET['campana'] ?? $_GET['c'] ?? '');
     $paramCareer = trim($_GET['carrera'] ?? '');
-    $paramUtm = trim($_GET['utm'] ?? $_GET['subcampana'] ?? $_GET['asesor'] ?? '');
+    $paramUtm = trim($_GET['subcanal'] ?? $_GET['utm'] ?? $_GET['subcampana'] ?? $_GET['asesor'] ?? '');
     $paramPhone = preg_replace('/\D/', '', (string) ($_GET['tel'] ?? ''));
 
     $finalPeriod = preg_match('/^20[2-3]\d(10|20|30)$/', $paramPeriod)
@@ -157,12 +157,12 @@ try {
 
     $finalSubcampaign = $paramUtm !== ''
         ? $paramUtm
-        : ((string) ($link['subcampaign'] ?: 'Portal Web'));
+        : ((string) ($link['subcampaign'] ?: 'portal-web'));
 
     $channelNames = [
         'web_institucional'    => 'Portal Web',
-        'link_ads'             => 'Link Ads (' . $finalSubcampaign . ')',
-        'mailing_sms_chattigo' => 'Mailing / SMS / Chattigo (' . $finalSubcampaign . ')',
+        'link_ads'             => 'Link Ads',
+        'mailing_sms_chattigo' => 'Nurturing',
         'asesor_prospector'    => 'Asesor / Prospector',
     ];
     $channelDisplay = $channelNames[$link['channel']] ?? 'Portal Web';
@@ -186,9 +186,9 @@ try {
         } catch (\Throwable $e) {
             // Ignorar
         }
-        $message = "Hola {$advisorName}, vengo de Asesor / Prospector, quisiera más información sobre {$finalCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
+        $message = "Hola {$advisorName}, vengo de Asesor / Prospector, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     } else {
-        $message = "Hola, vengo de {$channelDisplay}, quisiera más información sobre {$finalCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
+        $message = "Hola, vengo de {$channelDisplay}, ({$finalSubcampaign}), quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     }
 
     $shortLinkDisplay = sprintf(

@@ -16,6 +16,12 @@ export interface CareerItem {
   name: string;        // Ej: "Diseño de Modas", "Contabilidad", "Gastronomía"
 }
 
+export interface SubchannelItem {
+  id: number;
+  channel: ChannelKey; // Canal padre al que pertenece
+  name: string;        // Ej: "tiktok-ads", "google-pmax", "chattigo", "sms", "portal-web"
+}
+
 export interface AdvisorItem {
   id: number;
   name: string;         // Ej: "Gerber"
@@ -41,7 +47,7 @@ export interface LinkItem {
   period: string;      // Ej: "202710" (tomado del Periodo Global Activo)
   campaign: string;    // Ej: "NURTURING_CHATTIGO", "PORTALWEB", "ADMISION_PREGRADO"
   career: string;      // Ej: "Diseño de Modas", "Contabilidad"
-  subcampaign: string; // Ej: "Portal Web", "tiktok-ads", "chattigo", "Gerber"
+  subcampaign: string; // Subcanal (ej: "tiktok-ads", "chattigo", "portal-web") o Asesor ("Gerber")
   advisor_name?: string | null;
   destination_type: 'whatsapp' | 'url';
   destination_url: string | null;
@@ -60,7 +66,7 @@ export interface SubcampaignRecord {
   period: string;         // Ej: "202710"
   campaign: string;       // Ej: "PORTALWEB", "NURTURING_CHATTIGO"
   career: string;         // Ej: "Diseño de Modas"
-  subcampaign: string;    // Ej: "Portal Web", "tiktok-ads", "chattigo", "Gerber"
+  subcampaign: string;    // Subcanal ("tiktok-ads", "chattigo", "portal-web") o Asesor ("Gerber")
   advisor_name?: string | null;
   whatsapp_phone: string; // Ej: "51987654321"
   short_link: string;
@@ -73,7 +79,7 @@ export interface SubcampaignRecord {
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   web_institucional: 'Portal Web',
   link_ads: 'Link Ads',
-  mailing_sms_chattigo: 'Mailing / SMS / Chattigo',
+  mailing_sms_chattigo: 'Nurturing',
   asesor_prospector: 'Asesor / Prospector',
 };
 
@@ -84,24 +90,8 @@ export const CHANNEL_BASE_SLUGS: Record<ChannelKey, string> = {
   asesor_prospector: 'asesor',
 };
 
-export const LINK_ADS_PLATFORMS = [
-  { value: 'tiktok-ads', label: 'TikTok Ads (tiktok-ads)' },
-  { value: 'google-search', label: 'Google Search (google-search)' },
-  { value: 'google-display', label: 'Google Display (google-display)' },
-  { value: 'google-pmax', label: 'Google Performance Max (google-pmax)' },
-  { value: 'google-youtube', label: 'Google YouTube (google-youtube)' },
-  { value: 'linkedin-ads', label: 'LinkedIn Ads (linkedin-ads)' },
-] as const;
-
-export const CRM_ORIGINS = [
-  { value: 'chattigo', label: 'Chattigo (WhatsApp Masivo)' },
-  { value: 'sms', label: 'SMS Masivo' },
-  { value: 'mailing', label: 'Mailing / Correo' },
-] as const;
-
 /**
  * Genera un código corto determinista estilo Bitly (ej: "ic-8f4k2m")
- * a partir de los parámetros del enlace.
  */
 export function generateDeterministicShortCode(seed: string): string {
   let h1 = 0x811c9dc5;
@@ -145,16 +135,16 @@ export function isValidPeriodCode(code: string): boolean {
 }
 
 /**
- * Construye el texto pre-escrito de WhatsApp unificado para todos los escenarios:
- * - General: "Hola, vengo de [CANAL], quisiera más información sobre [CARRERA] en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
- * - Asesor/Prospector: "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA] en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
+ * Construye el texto real de WhatsApp cuando se guarda el enlace:
+ * - General: "Hola, vengo de [CANAL], ([SUBCANAL]), quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
+ * - Asesor/Prospector: "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
  */
 export function buildDefaultWhatsAppMessage(params: {
   channel: ChannelKey;
   campaign: string;
   career: string;
   period: string;
-  utmSource?: string;
+  subchannel?: string;
   advisorName?: string;
 }): string {
   const cleanCamp = sanitizeCampaignInput(params.campaign) || 'PORTALWEB';
@@ -163,16 +153,12 @@ export function buildDefaultWhatsAppMessage(params: {
   const code = `${cleanCamp}_${cleanPer}`;
 
   if (params.channel === 'asesor_prospector') {
-    const advisor = params.advisorName?.trim() || params.utmSource?.trim() || 'Gerber';
-    return `Hola ${advisor}, vengo de Asesor / Prospector, quisiera más información sobre ${cleanCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+    const advisor = params.advisorName?.trim() || params.subchannel?.trim() || 'Gerber';
+    return `Hola ${advisor}, vengo de Asesor / Prospector, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
   }
 
-  let channelDisplay = CHANNEL_LABELS[params.channel];
-  if (params.channel === 'link_ads' && params.utmSource) {
-    channelDisplay = `Link Ads (${params.utmSource})`;
-  } else if (params.channel === 'mailing_sms_chattigo' && params.utmSource) {
-    channelDisplay = `Mailing / SMS / Chattigo (${params.utmSource})`;
-  }
+  const channelLabel = CHANNEL_LABELS[params.channel];
+  const subchannelLabel = params.subchannel?.trim() || 'general';
 
-  return `Hola, vengo de ${channelDisplay}, quisiera más información sobre ${cleanCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+  return `Hola, vengo de ${channelLabel}, (${subchannelLabel}), quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }

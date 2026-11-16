@@ -10,9 +10,9 @@ import {
   Copy,
   Download,
   Edit3,
-  ExternalLink,
   FilterX,
   FlaskConical,
+  GitBranch,
   Link2,
   Lock,
   LogOut,
@@ -37,17 +37,15 @@ import {
   CareerItem,
   CHANNEL_LABELS,
   ChannelKey,
-  CRM_ORIGINS,
-  generateDeterministicShortCode,
   isValidPeriodCode,
-  LINK_ADS_PLATFORMS,
   LinkItem,
   PeriodItem,
   sanitizeCampaignInput,
   SubcampaignRecord,
+  SubchannelItem,
   WhatsAppNumberItem,
 } from './types/trace';
-import { buildSystemTrackingUrl, DataEngine } from './services/dataEngine';
+import { DataEngine } from './services/dataEngine';
 import { renderQrPngDataUrl, renderQrSvg } from './utils/qrGenerator';
 
 type MainModule = 'reports' | 'generator' | 'tools';
@@ -150,7 +148,10 @@ const MinimalBarChart: React.FC<{
         {items.map((item) => {
           const widthPct = Math.max(2, Math.round((item.clicks / maxClicks) * 100));
           return (
-            <div key={`${item.label}-${item.sublabel || ''}`} className="grid grid-cols-12 items-center gap-3 text-xs">
+            <div
+              key={`${item.label}-${item.sublabel || ''}`}
+              className="grid grid-cols-12 items-center gap-3 text-xs"
+            >
               <div className="col-span-4 sm:col-span-3 truncate font-semibold text-ic-dark">
                 {item.label}
                 {item.sublabel && (
@@ -197,6 +198,7 @@ export const App: React.FC = () => {
   const [activePeriod, setActivePeriod] = useState<string>('202710');
   const [campaigns, setCampaigns] = useState<string[]>([]);
   const [careers, setCareers] = useState<CareerItem[]>([]);
+  const [subchannels, setSubchannels] = useState<SubchannelItem[]>([]);
   const [advisors, setAdvisors] = useState<AdvisorItem[]>([]);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [records, setRecords] = useState<SubcampaignRecord[]>([]);
@@ -246,30 +248,31 @@ export const App: React.FC = () => {
   const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // GENERADOR DE ENLACES (Con botón Tijera para versión corta estilo Bitly)
+  // GENERADOR DE ENLACES (Canal -> Subcanal jerárquico)
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
+  const [genSubchannel, setGenSubchannel] = useState<string>('tiktok-ads');
+  const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
   const [genCampaignMode, setGenCampaignMode] = useState<'select' | 'new'>('select');
   const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('ADMISION_PREGRADO');
   const [genNewCampaignInput, setGenNewCampaignInput] = useState<string>('');
   const [genCareer, setGenCareer] = useState<string>('Diseño de Modas');
 
-  const [genLinkAdsUtm, setGenLinkAdsUtm] = useState<string>('tiktok-ads');
-  const [genCrmOrigin, setGenCrmOrigin] = useState<string>('chattigo');
-  const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
-
   const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
-  const [genShowShortPreview, setGenShowShortPreview] = useState<boolean>(false);
   const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
-  const [genFeedbackUrl, setGenFeedbackUrl] = useState<string | null>(null);
+  const [genFeedbackMessage, setGenFeedbackMessage] = useState<string | null>(null);
   const [linkSearch, setLinkSearch] = useState<string>('');
 
   // ===========================================================================
-  // CONFIGURACIÓN
+  // CONFIGURACIÓN (Periodos, Canales y Subcanales, Carreras, Asesores, WhatsApp)
   // ===========================================================================
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [newCareerInput, setNewCareerInput] = useState<string>('');
+
+  // Gestor jerárquico Canal -> Subcanal
+  const [cfgParentChannel, setCfgParentChannel] = useState<ChannelKey>('link_ads');
+  const [newSubchannelInput, setNewSubchannelInput] = useState<string>('');
 
   const [editingAdvisorId, setEditingAdvisorId] = useState<number | null>(null);
   const [advisorNameInput, setAdvisorNameInput] = useState<string>('');
@@ -362,6 +365,7 @@ export const App: React.FC = () => {
     const currentActivePeriod = DataEngine.getActivePeriod();
     const loadedCampaigns = DataEngine.getCampaigns();
     const loadedCareers = DataEngine.getCareers();
+    const loadedSubchannels = DataEngine.getSubchannels();
     const loadedAdvisors = DataEngine.getAdvisors();
     const loadedLinks = DataEngine.getLinks();
     const loadedRecords = DataEngine.getRecords();
@@ -375,6 +379,7 @@ export const App: React.FC = () => {
     }
     setCampaigns(loadedCampaigns);
     setCareers(loadedCareers);
+    setSubchannels(loadedSubchannels);
     setAdvisors(loadedAdvisors);
     setLinks(loadedLinks);
     setRecords(loadedRecords);
@@ -387,7 +392,7 @@ export const App: React.FC = () => {
       setGenAdvisorName(loadedAdvisors[0].name);
     }
     if (loadedLinks.length > 0 && !qrSelectedUrl) {
-      setQrSelectedUrl(loadedLinks[0].normal_url);
+      setQrSelectedUrl(loadedLinks[0].short_url);
     }
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
       setSimRecordId(loadedRecords[0].id);
@@ -415,6 +420,22 @@ export const App: React.FC = () => {
     });
     loadData();
   }, []);
+
+  // Sincronizar subcanal seleccionado cuando cambia el Canal en el Generador
+  const availableSubchannelsForGen = useMemo(() => {
+    return subchannels.filter((s) => s.channel === genChannel);
+  }, [subchannels, genChannel]);
+
+  useEffect(() => {
+    if (genChannel !== 'asesor_prospector') {
+      if (
+        availableSubchannelsForGen.length > 0 &&
+        !availableSubchannelsForGen.some((s) => s.name === genSubchannel)
+      ) {
+        setGenSubchannel(availableSubchannelsForGen[0].name);
+      }
+    }
+  }, [genChannel, availableSubchannelsForGen, genSubchannel]);
 
   useEffect(() => {
     const handleClickOutside = (ev: MouseEvent) => {
@@ -486,7 +507,7 @@ export const App: React.FC = () => {
   };
 
   // ===========================================================================
-  // CÁLCULO AUTOMÁTICO EN GENERADOR (Con Versión Corta Estilo Bitly)
+  // CÁLCULO AL GUARDAR EN EL GENERADOR DE ENLACES
   // ===========================================================================
   const effectiveCampaign = useMemo(() => {
     const raw =
@@ -494,12 +515,10 @@ export const App: React.FC = () => {
     return sanitizeCampaignInput(raw) || 'PORTALWEB';
   }, [genCampaignMode, genNewCampaignInput, genSelectedCampaign]);
 
-  const effectiveUtm = useMemo(() => {
-    if (genChannel === 'link_ads') return genLinkAdsUtm;
-    if (genChannel === 'mailing_sms_chattigo') return genCrmOrigin;
+  const effectiveSubchannel = useMemo(() => {
     if (genChannel === 'asesor_prospector') return genAdvisorName || 'Gerber';
-    return 'Portal Web';
-  }, [genChannel, genLinkAdsUtm, genCrmOrigin, genAdvisorName]);
+    return genSubchannel || 'general';
+  }, [genChannel, genSubchannel, genAdvisorName]);
 
   const effectivePhone = useMemo(() => {
     if (genChannel === 'asesor_prospector') {
@@ -508,39 +527,6 @@ export const App: React.FC = () => {
     }
     return genWaPhone;
   }, [genChannel, genAdvisorName, advisors, genWaPhone]);
-
-  const effectiveWaMessage = useMemo(() => {
-    return buildDefaultWhatsAppMessage({
-      channel: genChannel,
-      campaign: effectiveCampaign,
-      career: genCareer,
-      period: activePeriod,
-      utmSource: effectiveUtm,
-      advisorName: genAdvisorName,
-    });
-  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm, genAdvisorName]);
-
-  const generatedSystemUrl = useMemo(() => {
-    return buildSystemTrackingUrl({
-      channel: genChannel,
-      campaign: effectiveCampaign,
-      career: genCareer,
-      period: activePeriod,
-      utmSource: effectiveUtm,
-    });
-  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm]);
-
-  const previewShortUrl = useMemo(() => {
-    const code = generateDeterministicShortCode(
-      `${genChannel}|${effectiveCampaign}|${genCareer}|${activePeriod}|${effectiveUtm}`
-    );
-    return `https://trace.icontinental.edu.pe/${code}`;
-  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm]);
-
-  const directWhatsAppPreviewUrl = useMemo(() => {
-    const cleanPhone = effectivePhone.replace(/\D/g, '') || '51987654321';
-    return `https://api.whatsapp.com/send?phone=${encodeURIComponent(cleanPhone)}&text=${encodeURIComponent(effectiveWaMessage)}`;
-  }, [effectivePhone, effectiveWaMessage]);
 
   // ===========================================================================
   // AGREGACIONES PARA LAS 6 SECCIONES DE REPORTERÍA
@@ -592,7 +578,7 @@ export const App: React.FC = () => {
     return { byChannel: map, grandTotalClicks, grandTotalUnique, chartItems };
   }, [filteredRecords]);
 
-  // 2. Desglose por Canal
+  // 2. Desglose por Canal (Asesor/Prospector se ordena por Asesor; los demás por Campaña/Clics)
   const breakdownByChannel = useMemo(() => {
     const channelsOrder: ChannelKey[] = [
       'web_institucional',
@@ -603,7 +589,15 @@ export const App: React.FC = () => {
     return channelsOrder.map((ch) => {
       const rows = filteredRecords
         .filter((r) => r.channel === ch)
-        .sort((a, b) => b.clicks - a.clicks);
+        .sort((a, b) => {
+          if (ch === 'asesor_prospector') {
+            const cmp = (a.advisor_name || a.subcampaign).localeCompare(
+              b.advisor_name || b.subcampaign
+            );
+            if (cmp !== 0) return cmp;
+          }
+          return b.clicks - a.clicks;
+        });
       const totalClicks = rows.reduce((s, r) => s + r.clicks, 0);
       const totalUnique = rows.reduce((s, r) => s + r.unique_visitors, 0);
       return {
@@ -616,7 +610,7 @@ export const App: React.FC = () => {
     });
   }, [filteredRecords]);
 
-  // 3. Códigos más exitosos (Columna mandatoria: Código)
+  // 3. Códigos más exitosos (Con columna Subcanal al lado derecho de Canal)
   const buildCodesRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
@@ -626,6 +620,7 @@ export const App: React.FC = () => {
         campaign: string;
         career: string;
         channelLabel: string;
+        subchannelLabel: string;
         period: string;
         clicks: number;
         unique: number;
@@ -642,6 +637,7 @@ export const App: React.FC = () => {
           campaign: r.campaign,
           career: r.career,
           channelLabel: CHANNEL_LABELS[r.channel],
+          subchannelLabel: r.subcampaign,
           period: r.period,
           clicks: r.clicks,
           unique: r.unique_visitors,
@@ -651,6 +647,9 @@ export const App: React.FC = () => {
         existing.unique += r.unique_visitors;
         if (!existing.channelLabel.includes(CHANNEL_LABELS[r.channel])) {
           existing.channelLabel += `, ${CHANNEL_LABELS[r.channel]}`;
+        }
+        if (!existing.subchannelLabel.includes(r.subcampaign)) {
+          existing.subchannelLabel += `, ${r.subcampaign}`;
         }
         if (!existing.career.includes(r.career)) {
           existing.career += `, ${r.career}`;
@@ -666,7 +665,7 @@ export const App: React.FC = () => {
     [filteredRecords]
   );
 
-  // 4. Resultados por Carrera (Columna mandatoria: Carrera)
+  // 4. Resultados por Carrera (Con columna Subcanal al lado derecho de Canal)
   const buildCareersRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
@@ -675,6 +674,7 @@ export const App: React.FC = () => {
         career: string;
         campaign: string;
         channelLabel: string;
+        subchannelLabel: string;
         period: string;
         code: string;
         clicks: number;
@@ -692,6 +692,7 @@ export const App: React.FC = () => {
           career: r.career,
           campaign: r.campaign,
           channelLabel: CHANNEL_LABELS[r.channel],
+          subchannelLabel: r.subcampaign,
           period: r.period,
           code,
           clicks: r.clicks,
@@ -702,6 +703,9 @@ export const App: React.FC = () => {
         existing.unique += r.unique_visitors;
         if (!existing.channelLabel.includes(CHANNEL_LABELS[r.channel])) {
           existing.channelLabel += `, ${CHANNEL_LABELS[r.channel]}`;
+        }
+        if (!existing.subchannelLabel.includes(r.subcampaign)) {
+          existing.subchannelLabel += `, ${r.subcampaign}`;
         }
         if (!existing.campaign.includes(r.campaign)) {
           existing.campaign += `, ${r.campaign}`;
@@ -800,10 +804,10 @@ export const App: React.FC = () => {
     const headers = [
       'Campana',
       'Canal',
+      'Subcanal',
       'Carrera',
       'Periodo',
       'Codigo',
-      'Suborigen_o_Asesor',
       'Telefono_WhatsApp',
       'Clics_Totales',
       'Personas_Unicas',
@@ -812,10 +816,10 @@ export const App: React.FC = () => {
     const rows = filteredRecords.map((r) => [
       `"${r.campaign}"`,
       `"${CHANNEL_LABELS[r.channel]}"`,
+      `"${r.subcampaign.replace(/"/g, '""')}"`,
       `"${r.career.replace(/"/g, '""')}"`,
       `"${r.period}"`,
       `"${r.campaign}_${r.period}"`,
-      `"${r.subcampaign.replace(/"/g, '""')}"`,
       `"${r.whatsapp_phone}"`,
       r.clicks,
       r.unique_visitors,
@@ -833,22 +837,30 @@ export const App: React.FC = () => {
 
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
-    setGenFeedbackUrl(null);
+    setGenFeedbackMessage(null);
     try {
-      const created = await DataEngine.createLink({
+      const realMessage = buildDefaultWhatsAppMessage({
+        channel: genChannel,
+        campaign: effectiveCampaign,
+        career: genCareer,
+        period: activePeriod,
+        subchannel: effectiveSubchannel,
+        advisorName: genAdvisorName,
+      });
+
+      await DataEngine.createLink({
         channel: genChannel,
         period: activePeriod,
         campaign: effectiveCampaign,
         career: genCareer,
-        subcampaign: effectiveUtm,
+        subcampaign: effectiveSubchannel,
         advisor_name: genChannel === 'asesor_prospector' ? genAdvisorName : undefined,
         whatsapp_phone: effectivePhone,
-        whatsapp_message: effectiveWaMessage,
+        whatsapp_message: realMessage,
         is_purgeable: genIsPurgeable,
       });
-      const urlToCopy = genShowShortPreview ? created.short_url : created.normal_url;
-      setGenFeedbackUrl(urlToCopy);
-      copyToClipboard(urlToCopy, 'gen-preview');
+
+      setGenFeedbackMessage('Enlace guardado. Cópialo desde la lista de Enlaces Activos.');
       if (genCampaignMode === 'new') {
         setGenSelectedCampaign(effectiveCampaign);
         setGenCampaignMode('select');
@@ -1247,7 +1259,7 @@ export const App: React.FC = () => {
                       >
                         {records.map((r) => (
                           <option key={r.id} value={r.id}>
-                            [{r.campaign}_{r.period}] {r.career} ({r.clicks} clics)
+                            [{r.campaign}_{r.period}] {r.career} ({r.subcampaign} — {r.clicks} clics)
                           </option>
                         ))}
                       </select>
@@ -1302,7 +1314,7 @@ export const App: React.FC = () => {
            =================================================================== */}
         {activeModule === 'reports' && (
           <>
-            {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón + Periodo (Preselect en Activo) */}
+            {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón + Periodo */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-ic-border pb-5">
               <h1 className="text-2xl font-serif font-bold text-ic-dark">
                 Reportería
@@ -1424,7 +1436,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Selector de PERIODO (Preselect en Periodo Activo; si es 'all' muestra Acordeón por Periodo) */}
+                {/* Selector de PERIODO (Preselect en Activo; Todos abre acordeón) */}
                 <div className="flex items-center gap-1.5 bg-white border border-ic-border px-3 py-2 text-xs">
                   <span className="text-ic-muted font-medium">Periodo:</span>
                   <select
@@ -1472,7 +1484,7 @@ export const App: React.FC = () => {
             </div>
 
             {/* ===============================================================
-                1. CONTEO GENERAL POR CANAL (Con Gráfico de Barras y Scroll)
+                1. CONTEO GENERAL POR CANAL
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between">
@@ -1540,7 +1552,10 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                2. DESGLOSE POR CANAL (Columna Mandatoria: Campaña + Copa 1er puesto)
+                2. DESGLOSE POR CANAL
+                - Ya no imprime Canal sino SUBCANAL
+                - Asesor/Prospector es el único que se ordena por Asesor (Asesor en 1ra columna mandatoria)
+                - En los demás canales la 1ra columna mandatoria es Campaña
                =============================================================== */}
             <section className="space-y-5">
               <div className="flex items-center gap-3">
@@ -1560,9 +1575,19 @@ export const App: React.FC = () => {
                       <thead>
                         <tr className="border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
                           <th className="py-2.5 pl-5 pr-2 w-14">#</th>
-                          <th className="py-2.5 px-4 text-ic-dark font-bold">Campaña</th>
-                          {isAdvisorChannel && <th className="py-2.5 px-4">Asesor</th>}
-                          <th className="py-2.5 px-4">Canal</th>
+                          {isAdvisorChannel ? (
+                            <>
+                              <th className="py-2.5 px-4 text-ic-dark font-bold">
+                                Asesor (Subcanal)
+                              </th>
+                              <th className="py-2.5 px-4">Campaña</th>
+                            </>
+                          ) : (
+                            <>
+                              <th className="py-2.5 px-4 text-ic-dark font-bold">Campaña</th>
+                              <th className="py-2.5 px-4">Subcanal</th>
+                            </>
+                          )}
                           <th className="py-2.5 px-4">Carrera</th>
                           <th className="py-2.5 px-4">Periodo</th>
                           <th className="py-2.5 px-4">Código</th>
@@ -1573,10 +1598,7 @@ export const App: React.FC = () => {
                       <tbody className="divide-y divide-gray-100 text-xs">
                         {rows.length === 0 ? (
                           <tr>
-                            <td
-                              colSpan={isAdvisorChannel ? 9 : 8}
-                              className="py-4 px-6 text-ic-muted"
-                            >
+                            <td colSpan={8} className="py-4 px-6 text-ic-muted">
                               Sin registros en el periodo seleccionado.
                             </td>
                           </tr>
@@ -1586,20 +1608,25 @@ export const App: React.FC = () => {
                             return (
                               <tr key={row.id} className="hover:bg-gray-50">
                                 <RankCell index={idx} />
-                                <td className="py-2.5 px-4 font-mono font-bold text-ic-dark">
-                                  {row.campaign}
-                                </td>
-                                {isAdvisorChannel && (
-                                  <td className="py-2.5 px-4 font-semibold text-ic-dark">
-                                    {row.advisor_name || row.subcampaign}
-                                  </td>
+                                {isAdvisorChannel ? (
+                                  <>
+                                    <td className="py-2.5 px-4 font-bold text-ic-dark">
+                                      {row.advisor_name || row.subcampaign}
+                                    </td>
+                                    <td className="py-2.5 px-4 font-mono text-ic-dark">
+                                      {row.campaign}
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td className="py-2.5 px-4 font-mono font-bold text-ic-dark">
+                                      {row.campaign}
+                                    </td>
+                                    <td className="py-2.5 px-4 font-mono text-ic-slate">
+                                      {row.subcampaign}
+                                    </td>
+                                  </>
                                 )}
-                                <td className="py-2.5 px-4 text-ic-slate">
-                                  {block.channel === 'web_institucional' ||
-                                  block.channel === 'asesor_prospector'
-                                    ? block.channelLabel
-                                    : `${block.channelLabel} (${row.subcampaign})`}
-                                </td>
                                 <td className="py-2.5 px-4 font-medium text-ic-dark">
                                   {row.career}
                                 </td>
@@ -1700,7 +1727,7 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                3. CÓDIGOS MÁS EXITOSOS (Columna Mandatoria: Código + Gráfico)
+                3. CÓDIGOS MÁS EXITOSOS (Con Subcanal al lado derecho de Canal)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
@@ -1721,6 +1748,7 @@ export const App: React.FC = () => {
                           <th className="py-2.5 px-4">Campaña</th>
                           <th className="py-2.5 px-4">Carrera</th>
                           <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Subcanal</th>
                           <th className="py-2.5 px-4">Periodo</th>
                           <th className="py-2.5 px-4 text-right">Clics</th>
                           <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
@@ -1742,6 +1770,9 @@ export const App: React.FC = () => {
                               {item.career}
                             </td>
                             <td className="py-3 px-4 text-ic-slate">{item.channelLabel}</td>
+                            <td className="py-3 px-4 font-mono text-ic-slate">
+                              {item.subchannelLabel}
+                            </td>
                             <td className="py-3 px-4 font-mono text-ic-slate">
                               {item.period}
                             </td>
@@ -1819,7 +1850,7 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                4. RESULTADOS POR CARRERA (Columna Mandatoria: Carrera + Gráfico)
+                4. RESULTADOS POR CARRERA (Con Subcanal al lado derecho de Canal)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
@@ -1839,6 +1870,7 @@ export const App: React.FC = () => {
                           <th className="py-2.5 px-4 text-ic-dark font-bold">Carrera</th>
                           <th className="py-2.5 px-4">Campaña</th>
                           <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Subcanal</th>
                           <th className="py-2.5 px-4">Periodo</th>
                           <th className="py-2.5 px-4">Código</th>
                           <th className="py-2.5 px-4 text-right">Clics</th>
@@ -1856,6 +1888,9 @@ export const App: React.FC = () => {
                               {item.campaign}
                             </td>
                             <td className="py-3 px-4 text-ic-slate">{item.channelLabel}</td>
+                            <td className="py-3 px-4 font-mono text-ic-slate">
+                              {item.subchannelLabel}
+                            </td>
                             <td className="py-3 px-4 font-mono text-ic-slate">
                               {item.period}
                             </td>
@@ -2079,7 +2114,8 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 02: GENERADOR DE ENLACES (Con Botón Tijera Acortador)
+            MÓDULO 02: GENERADOR DE ENLACES
+            (Esquema de variables sin renderizar y sin botones de copiar antes de guardar)
            =================================================================== */}
         {activeModule === 'generator' && (
           <div className="space-y-6">
@@ -2110,60 +2146,47 @@ export const App: React.FC = () => {
                       className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
                     >
                       <option value="web_institucional">Portal Web</option>
-                      <option value="link_ads">
-                        Link Ads (TikTok, Google Display, PMax, YouTube)
-                      </option>
-                      <option value="mailing_sms_chattigo">
-                        Mailing / SMS / Chattigo
-                      </option>
+                      <option value="link_ads">Link Ads</option>
+                      <option value="mailing_sms_chattigo">Nurturing</option>
                       <option value="asesor_prospector">Asesor / Prospector</option>
                     </select>
                   </div>
 
-                  {/* SUB-SELECTOR SEGÚN ESCENARIO */}
-                  {genChannel === 'link_ads' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                        Plataforma (utm) *
-                      </label>
-                      <select
-                        value={genLinkAdsUtm}
-                        onChange={(e) => setGenLinkAdsUtm(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                      >
-                        {LINK_ADS_PLATFORMS.map((p) => (
-                          <option key={p.value} value={p.value}>
-                            {p.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {genChannel === 'mailing_sms_chattigo' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                        Medio (utm) *
-                      </label>
-                      <select
-                        value={genCrmOrigin}
-                        onChange={(e) => setGenCrmOrigin(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                      >
-                        {CRM_ORIGINS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {genChannel === 'asesor_prospector' && (
+                  {/* 2. SUBCANAL (Unido jerárquicamente al Canal elegido) */}
+                  {genChannel !== 'asesor_prospector' ? (
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
-                          Asesor *
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                          2. Subcanal ({CHANNEL_LABELS[genChannel]}) *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCfgParentChannel(genChannel);
+                            setActiveModule('tools');
+                          }}
+                          className="text-[11px] text-ic-red font-medium hover:underline"
+                        >
+                          + Crear Subcanal
+                        </button>
+                      </div>
+                      <select
+                        value={genSubchannel}
+                        onChange={(e) => setGenSubchannel(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                      >
+                        {availableSubchannelsForGen.map((s) => (
+                          <option key={s.id} value={s.name}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                          2. Asesor (Subcanal) *
                         </label>
                         <button
                           type="button"
@@ -2187,12 +2210,12 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 2. CAMPAÑA Y 3. CARRERA + PERIODO INFORMATIVO */}
+                  {/* 3. CAMPAÑA Y 4. CARRERA + PERIODO INFORMATIVO */}
                   <div className="p-3.5 bg-[#FAFAFA] border border-ic-border space-y-3">
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                          2. Campaña *
+                          3. Campaña *
                         </label>
                         <button
                           type="button"
@@ -2240,11 +2263,11 @@ export const App: React.FC = () => {
                       )}
                     </div>
 
-                    {/* 3. CARRERA */}
+                    {/* 4. CARRERA */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                          3. Carrera *
+                          4. Carrera *
                         </label>
                         <button
                           type="button"
@@ -2272,14 +2295,9 @@ export const App: React.FC = () => {
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
                         Periodo Activo:
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 bg-white border border-ic-border font-mono font-bold text-ic-red">
-                          {activePeriod}
-                        </span>
-                        <span className="font-mono text-[11px] text-ic-dark font-semibold">
-                          → {effectiveCampaign}_{activePeriod}
-                        </span>
-                      </div>
+                      <span className="px-2 py-0.5 bg-white border border-ic-border font-mono font-bold text-ic-red">
+                        {activePeriod}
+                      </span>
                     </div>
                   </div>
 
@@ -2303,86 +2321,27 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Vista previa del Texto Pre-escrito */}
-                  <div className="p-3 bg-[#FAFAFA] border border-ic-border space-y-1.5">
-                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <span>Texto Pre-escrito WhatsApp</span>
-                      <a
-                        href={directWhatsAppPreviewUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-ic-red hover:underline inline-flex items-center gap-1 font-semibold"
-                      >
-                        Probar texto en WhatsApp <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                    <div className="text-xs text-ic-dark font-mono bg-white p-2.5 border border-ic-border leading-relaxed">
-                      {effectiveWaMessage}
-                    </div>
-                  </div>
-
-                  {/* ENLACE FINAL + BOTÓN ROJO ÉNFASIS CON ICONO DE TIJERA (ACORTADOR) */}
-                  <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-2.5">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                      Enlace Generado:
-                    </div>
-                    <div className="p-2.5 bg-white border border-ic-border font-mono text-[11px] text-ic-dark break-all select-all">
-                      {generatedSystemUrl}
-                    </div>
-
-                    {genShowShortPreview && (
-                      <div className="p-2 bg-ic-redSoft border border-ic-red/30 font-mono text-xs text-ic-red font-bold flex items-center justify-between">
-                        <span>{previewShortUrl}</span>
-                        <span className="text-[10px] uppercase tracking-wider">
-                          Versión Corta
-                        </span>
+                  {/* ESQUEMA EN FUNCIÓN A VARIABLES (SIN RENDERIZAR VARIABLES NI COPIAR ANTES DE GUARDAR) */}
+                  <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-3">
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                        Estructura de Texto Pre-generado:
                       </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            copyToClipboard(
-                              genShowShortPreview ? previewShortUrl : generatedSystemUrl,
-                              'gen-preview'
-                            )
-                          }
-                          className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center gap-1.5"
-                        >
-                          {copiedKey === 'gen-preview' ? (
-                            <>
-                              <Check className="w-3.5 h-3.5" /> Copiado
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" /> Copiar
-                            </>
-                          )}
-                        </button>
-
-                        {/* Botón pequeño tipo checkbox rojo énfasis con relleno de SVG de tijera */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = !genShowShortPreview;
-                            setGenShowShortPreview(next);
-                            if (next) {
-                              copyToClipboard(previewShortUrl, 'short-toggle');
-                            }
-                          }}
-                          className={`p-1.5 border transition-colors flex items-center gap-1 text-xs font-medium ${
-                            genShowShortPreview
-                              ? 'bg-ic-red text-white border-ic-red ring-2 ring-ic-red/30'
-                              : 'bg-ic-red hover:bg-ic-redHover text-white border-ic-red'
-                          }`}
-                          title="Generar y copiar versión corta del enlace"
-                        >
-                          <Scissors className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="text-xs text-ic-dark font-mono bg-white p-2.5 border border-ic-border leading-relaxed">
+                        Hola, vengo de [CANAL], ([SUBCANAL]), quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=CAMPAÑA+PERIODO]
                       </div>
+                    </div>
 
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                        Tu enlace se verá así:
+                      </div>
+                      <div className="p-2.5 bg-white border border-ic-border font-mono text-[11px] text-ic-dark break-all">
+                        https://trace.icontinental.edu.pe/[CANAL]?subcanal=[SUBCANAL]&amp;campana=[CAMPAÑA]&amp;carrera=[CARRERA]&amp;periodo=[PERIODO]
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex items-center justify-end">
                       <label className="flex items-center gap-1.5 text-xs text-ic-dark cursor-pointer">
                         <input
                           type="checkbox"
@@ -2391,7 +2350,7 @@ export const App: React.FC = () => {
                           className="accent-ic-red"
                         />
                         <FlaskConical className="w-3.5 h-3.5 text-ic-red" />
-                        <span>Es prueba</span>
+                        <span>Definir como enlace de prueba (depurable)</span>
                       </label>
                     </div>
                   </div>
@@ -2404,15 +2363,15 @@ export const App: React.FC = () => {
                     Guardar Enlace
                   </button>
 
-                  {genFeedbackUrl && (
-                    <div className="p-2.5 bg-green-50 border border-green-200 text-xs text-green-900 font-mono truncate">
-                      Guardado: {genFeedbackUrl}
+                  {genFeedbackMessage && (
+                    <div className="p-2.5 bg-green-50 border border-green-200 text-xs text-green-900 font-medium">
+                      {genFeedbackMessage}
                     </div>
                   )}
                 </form>
               </div>
 
-              {/* LISTA DE ENLACES GENERADOS (Con texto acortado debajo y botón rojo Acortado debajo de Copiar) */}
+              {/* LISTA DE ENLACES ACTIVOS (Aquí sí están las opciones de Copiar y Acortado) */}
               <div className="lg:col-span-7 bg-white border border-ic-border">
                 <div className="p-4 border-b border-ic-border flex items-center justify-between gap-3">
                   <h2 className="text-base font-serif font-bold text-ic-dark">
@@ -2425,7 +2384,7 @@ export const App: React.FC = () => {
                       type="text"
                       value={linkSearch}
                       onChange={(e) => setLinkSearch(e.target.value)}
-                      placeholder="Buscar campaña, carrera, código..."
+                      placeholder="Buscar campaña, subcanal, carrera..."
                       className="w-full pl-8 pr-3 py-1.5 text-xs border border-ic-border focus:outline-none"
                     />
                   </div>
@@ -2448,7 +2407,7 @@ export const App: React.FC = () => {
                         <div className="space-y-1.5 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] font-semibold uppercase px-2 py-0.5 bg-gray-100 text-ic-dark">
-                              {CHANNEL_LABELS[link.channel]}
+                              {CHANNEL_LABELS[link.channel]} ({link.subcampaign})
                             </span>
                             <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
                               {link.campaign}_{link.period}
@@ -2556,7 +2515,7 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 03: CONFIGURACIÓN
+            MÓDULO 03: CONFIGURACIÓN (Incluye Gestor Jerárquico Canal -> Subcanal)
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
@@ -2566,14 +2525,131 @@ export const App: React.FC = () => {
               </h1>
             </div>
 
+            {/* BLOQUE JERÁRQUICO: CANALES Y SUBCANALES */}
+            <section className="bg-white border border-ic-border p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    1. Jerarquía de Canales y Subcanales
+                  </h2>
+                </div>
+                <span className="text-xs font-mono text-ic-muted">
+                  Selecciona un Canal existente para crear sus Subcanales
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Selección de Canal Padre */}
+                <div className="lg:col-span-4 space-y-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
+                    Canales Existentes
+                  </div>
+                  <div className="border border-ic-border divide-y divide-ic-border">
+                    {(['web_institucional', 'link_ads', 'mailing_sms_chattigo'] as ChannelKey[]).map(
+                      (ch) => {
+                        const count = subchannels.filter((s) => s.channel === ch).length;
+                        const isSelected = cfgParentChannel === ch;
+                        return (
+                          <button
+                            key={ch}
+                            type="button"
+                            onClick={() => setCfgParentChannel(ch)}
+                            className={`w-full p-3 text-left text-xs flex items-center justify-between transition-colors ${
+                              isSelected
+                                ? 'bg-ic-redSoft text-ic-red font-bold'
+                                : 'bg-white text-ic-dark hover:bg-gray-50'
+                            }`}
+                          >
+                            <span>{CHANNEL_LABELS[ch]}</span>
+                            <span className="font-mono text-[11px]">
+                              {count} subcanales
+                            </span>
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+                </div>
+
+                {/* Creación y lista de Subcanales del Canal seleccionado */}
+                <div className="lg:col-span-8 space-y-3">
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!newSubchannelInput.trim()) return;
+                      await DataEngine.createSubchannel(cfgParentChannel, newSubchannelInput);
+                      setNewSubchannelInput('');
+                      refreshLocalState();
+                    }}
+                    className="flex gap-2"
+                  >
+                    <div className="px-3 py-2 bg-[#FAFAFA] border border-ic-border text-xs font-semibold text-ic-dark flex items-center">
+                      {CHANNEL_LABELS[cfgParentChannel]} →
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={newSubchannelInput}
+                      onChange={(e) => setNewSubchannelInput(e.target.value)}
+                      placeholder="Nuevo subcanal (ej: tiktok-ads, google-pmax, chattigo)"
+                      className="flex-1 px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                    >
+                      Agregar Subcanal
+                    </button>
+                  </form>
+
+                  <div className="border border-ic-border divide-y divide-ic-border">
+                    {subchannels
+                      .filter((s) => s.channel === cfgParentChannel)
+                      .map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase px-2 py-0.5 bg-gray-100 text-ic-muted font-semibold">
+                              {CHANNEL_LABELS[sub.channel]}
+                            </span>
+                            <span className="font-mono font-bold text-ic-dark">
+                              {sub.name}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmDelete({
+                                title: `¿Seguro que quieres eliminar el subcanal "${sub.name}"?`,
+                                description: `Pertenece al canal ${CHANNEL_LABELS[sub.channel]}.`,
+                                onConfirm: async () => {
+                                  await DataEngine.deleteSubchannel(sub.id);
+                                  refreshLocalState();
+                                },
+                              })
+                            }
+                            className="p-1 text-ic-muted hover:text-ic-red"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* 1. GESTOR DE PERIODOS */}
+              {/* 2. GESTOR DE PERIODOS */}
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-ic-border pb-3">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-ic-red" />
                     <h2 className="text-base font-serif font-bold text-ic-dark">
-                      1. Periodos (Estado Global)
+                      2. Periodos (Estado Global)
                     </h2>
                   </div>
                   <span className="text-xs font-mono text-ic-red font-bold">
@@ -2686,13 +2762,13 @@ export const App: React.FC = () => {
                 </div>
               </section>
 
-              {/* 2. MÓDULO DE CREACIÓN DE CARRERAS */}
+              {/* 3. MÓDULO DE CREACIÓN DE CARRERAS */}
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-ic-border pb-3">
                   <div className="flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-ic-red" />
                     <h2 className="text-base font-serif font-bold text-ic-dark">
-                      2. Creación de Carreras
+                      3. Creación de Carreras
                     </h2>
                   </div>
                   <span className="text-xs font-mono text-ic-muted">
@@ -2757,13 +2833,13 @@ export const App: React.FC = () => {
               </section>
             </div>
 
-            {/* 3. ASESORES Y 4. NÚMEROS DE WHATSAPP */}
+            {/* 4. ASESORES Y 5. NÚMEROS DE WHATSAPP */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <UserCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    3. Asesores / Prospectores
+                    4. Asesores / Prospectores
                   </h2>
                 </div>
 
@@ -2856,7 +2932,7 @@ export const App: React.FC = () => {
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <Phone className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    4. Números de WhatsApp Institucionales
+                    5. Números de WhatsApp Institucionales
                   </h2>
                 </div>
 
@@ -2950,13 +3026,13 @@ export const App: React.FC = () => {
               </section>
             </div>
 
-            {/* 5. QR Y SIMULADOR */}
+            {/* 6. QR Y SIMULADOR */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <QrCode className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    5. Código QR
+                    6. Código QR
                   </h2>
                 </div>
 
@@ -3020,7 +3096,7 @@ export const App: React.FC = () => {
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <ShieldCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    6. Simulador y Depurador de Pruebas
+                    7. Simulador y Depurador de Pruebas
                   </h2>
                 </div>
 
@@ -3084,7 +3160,7 @@ export const App: React.FC = () => {
       </main>
 
       {/* =====================================================================
-          FOOTER MINIMALISTA (Logo pequeño a la izquierda href inicio + Copyright a la derecha href lumine.pe)
+          FOOTER MINIMALISTA
          ===================================================================== */}
       <footer className="bg-white border-t border-ic-border mt-12">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between text-xs text-ic-muted">
