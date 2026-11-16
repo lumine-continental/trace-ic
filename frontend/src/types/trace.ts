@@ -33,6 +33,8 @@ export interface WhatsAppNumberItem {
 export interface LinkItem {
   id: number;
   slug: string;
+  short_code: string;  // Ej: "ic-7k9x2m"
+  short_url: string;   // Ej: "https://trace.icontinental.edu.pe/ic-7k9x2m"
   normal_url: string;
   title: string;
   channel: ChannelKey;
@@ -71,7 +73,7 @@ export interface SubcampaignRecord {
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   web_institucional: 'Portal Web',
   link_ads: 'Link Ads',
-  mailing_sms_chattigo: 'Mailing / SMS / Chattigo (/CRM)',
+  mailing_sms_chattigo: 'Mailing / SMS / Chattigo',
   asesor_prospector: 'Asesor / Prospector',
 };
 
@@ -96,6 +98,26 @@ export const CRM_ORIGINS = [
   { value: 'sms', label: 'SMS Masivo' },
   { value: 'mailing', label: 'Mailing / Correo' },
 ] as const;
+
+/**
+ * Genera un código corto determinista estilo Bitly (ej: "ic-8f4k2m")
+ * a partir de los parámetros del enlace.
+ */
+export function generateDeterministicShortCode(seed: string): string {
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h1 ^= seed.charCodeAt(i);
+    h1 = Math.imul(h1, 0x01000193);
+  }
+  const alphabet = '23456789abcdefghjkmnpqrstuvwxyz';
+  let val = Math.abs(h1 >>> 0);
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += alphabet[val % alphabet.length];
+    val = Math.floor(val / alphabet.length) ^ ((h1 >>> (i * 4)) & 0xff);
+  }
+  return `ic-${code}`;
+}
 
 /**
  * Normaliza en vivo la caja de texto de Campaña:
@@ -149,7 +171,7 @@ export function buildDefaultWhatsAppMessage(params: {
   if (params.channel === 'link_ads' && params.utmSource) {
     channelDisplay = `Link Ads (${params.utmSource})`;
   } else if (params.channel === 'mailing_sms_chattigo' && params.utmSource) {
-    channelDisplay = `CRM (${params.utmSource})`;
+    channelDisplay = `Mailing / SMS / Chattigo (${params.utmSource})`;
   }
 
   return `Hola, vengo de ${channelDisplay}, quisiera más información sobre ${cleanCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;

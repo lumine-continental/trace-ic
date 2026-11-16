@@ -6,6 +6,7 @@ import {
   Calendar,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   Edit3,
@@ -21,10 +22,12 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  Scissors,
   Search,
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  Trophy,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -35,6 +38,7 @@ import {
   CHANNEL_LABELS,
   ChannelKey,
   CRM_ORIGINS,
+  generateDeterministicShortCode,
   isValidPeriodCode,
   LINK_ADS_PLATFORMS,
   LinkItem,
@@ -78,7 +82,9 @@ const DATE_PRESET_LABELS: Record<DatePreset, string> = {
   all: 'Todo el historial',
 };
 
-const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v3';
+const LOGO_IC_NEGRO =
+  'https://icontinental.edu.pe/wp-content/uploads/2025/11/logo-ic-negro.svg';
+const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v4';
 
 function formatShortDateEs(isoDate: string): string {
   if (!isoDate) return '';
@@ -105,7 +111,28 @@ function formatShortDateEs(isoDate: string): string {
 }
 
 /**
- * Componente reutilizable de Gráfico de Barras Minimalista Sencillo
+ * Celda de numeración (#) con icono SVG de Copa para el 1er puesto
+ */
+const RankCell: React.FC<{ index: number }> = ({ index }) => {
+  const num = String(index + 1).padStart(2, '0');
+  return (
+    <td className="py-2.5 pl-5 pr-2 w-14 font-mono text-[11px] tabular-nums">
+      <div className="inline-flex items-center gap-1.5">
+        {index === 0 ? (
+          <Trophy className="w-3.5 h-3.5 text-ic-red flex-shrink-0" />
+        ) : (
+          <span className="w-3.5 inline-block" />
+        )}
+        <span className={index === 0 ? 'font-bold text-ic-red' : 'text-ic-muted'}>
+          {num}
+        </span>
+      </div>
+    </td>
+  );
+};
+
+/**
+ * Gráfico de Barras Minimalista Sencillo
  */
 const MinimalBarChart: React.FC<{
   title: string;
@@ -123,11 +150,11 @@ const MinimalBarChart: React.FC<{
         {items.map((item) => {
           const widthPct = Math.max(2, Math.round((item.clicks / maxClicks) * 100));
           return (
-            <div key={item.label} className="grid grid-cols-12 items-center gap-3 text-xs">
-              <div className="col-span-4 sm:col-span-3 truncate font-medium text-ic-dark">
+            <div key={`${item.label}-${item.sublabel || ''}`} className="grid grid-cols-12 items-center gap-3 text-xs">
+              <div className="col-span-4 sm:col-span-3 truncate font-semibold text-ic-dark">
                 {item.label}
                 {item.sublabel && (
-                  <span className="ml-1.5 text-[10px] font-mono text-ic-muted">
+                  <span className="ml-1.5 text-[10px] font-mono font-normal text-ic-muted">
                     ({item.sublabel})
                   </span>
                 )}
@@ -150,7 +177,6 @@ const MinimalBarChart: React.FC<{
 };
 
 export const App: React.FC = () => {
-  // Toda la aplicación está protegida por Login
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
       return localStorage.getItem(AUTH_STORAGE_KEY) === '1';
@@ -158,8 +184,9 @@ export const App: React.FC = () => {
       return false;
     }
   });
-  const [loginEmail, setLoginEmail] = useState('admin@icontinental.edu.pe');
-  const [loginPassword, setLoginPassword] = useState('TraceIC2026!');
+  // Sin autocompletado inicial en el Login
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginLoading, setLoginLoading] = useState<boolean>(false);
 
@@ -187,12 +214,15 @@ export const App: React.FC = () => {
   const [tempEnd, setTempEnd] = useState<string>('2026-11-30');
   const dateDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('all');
+  // Preselect en el Periodo Activo Global (cuando es 'all' muestra acordeones por periodo)
+  const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('202710');
+  const [hasInitializedPeriodFilter, setHasInitializedPeriodFilter] = useState<boolean>(false);
+  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({});
   const [highlightedChannel, setHighlightedChannel] = useState<ChannelKey | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ===========================================================================
-  // MODAL DE CONFIRMACIÓN DE ELIMINACIÓN ("¿Seguro que quieres eliminar?")
+  // MODAL DE CONFIRMACIÓN DE ELIMINACIÓN
   // ===========================================================================
   const [confirmDelete, setConfirmDelete] = useState<{
     title: string;
@@ -202,7 +232,7 @@ export const App: React.FC = () => {
   const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS POR RANGO DE FECHAS
+  // MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS
   // ===========================================================================
   const [isPurgeModalOpen, setIsPurgeModalOpen] = useState<boolean>(false);
   const [purgeStartDate, setPurgeStartDate] = useState<string>('2025-01-01');
@@ -216,7 +246,7 @@ export const App: React.FC = () => {
   const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // GENERADOR DE ENLACES (Periodo solo informativo, con Campaña y Carrera)
+  // GENERADOR DE ENLACES (Con botón Tijera para versión corta estilo Bitly)
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
   const [genCampaignMode, setGenCampaignMode] = useState<'select' | 'new'>('select');
@@ -224,22 +254,21 @@ export const App: React.FC = () => {
   const [genNewCampaignInput, setGenNewCampaignInput] = useState<string>('');
   const [genCareer, setGenCareer] = useState<string>('Diseño de Modas');
 
-  // Sub-escenarios
   const [genLinkAdsUtm, setGenLinkAdsUtm] = useState<string>('tiktok-ads');
   const [genCrmOrigin, setGenCrmOrigin] = useState<string>('chattigo');
   const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
 
   const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
+  const [genShowShortPreview, setGenShowShortPreview] = useState<boolean>(false);
   const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
   const [genFeedbackUrl, setGenFeedbackUrl] = useState<string | null>(null);
   const [linkSearch, setLinkSearch] = useState<string>('');
 
   // ===========================================================================
-  // CONFIGURACIÓN: PERIODOS, CARRERAS, ASESORES, WHATSAPP, QR Y SIMULADOR
+  // CONFIGURACIÓN
   // ===========================================================================
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [periodError, setPeriodError] = useState<string | null>(null);
-
   const [newCareerInput, setNewCareerInput] = useState<string>('');
 
   const [editingAdvisorId, setEditingAdvisorId] = useState<number | null>(null);
@@ -340,6 +369,10 @@ export const App: React.FC = () => {
 
     setPeriods(loadedPeriods);
     setActivePeriod(currentActivePeriod);
+    if (!hasInitializedPeriodFilter) {
+      setReportPeriodFilter(currentActivePeriod);
+      setHasInitializedPeriodFilter(true);
+    }
     setCampaigns(loadedCampaigns);
     setCareers(loadedCareers);
     setAdvisors(loadedAdvisors);
@@ -422,6 +455,8 @@ export const App: React.FC = () => {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
+    setLoginEmail('');
+    setLoginPassword('');
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     } catch {
@@ -443,8 +478,15 @@ export const App: React.FC = () => {
     }
   };
 
+  const toggleAccordion = (key: string) => {
+    setOpenAccordions((prev) => ({
+      ...prev,
+      [key]: !(prev[key] ?? true),
+    }));
+  };
+
   // ===========================================================================
-  // CÁLCULO AUTOMÁTICO EN GENERADOR (Con Periodo Activo Global Fijo)
+  // CÁLCULO AUTOMÁTICO EN GENERADOR (Con Versión Corta Estilo Bitly)
   // ===========================================================================
   const effectiveCampaign = useMemo(() => {
     const raw =
@@ -488,13 +530,20 @@ export const App: React.FC = () => {
     });
   }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm]);
 
+  const previewShortUrl = useMemo(() => {
+    const code = generateDeterministicShortCode(
+      `${genChannel}|${effectiveCampaign}|${genCareer}|${activePeriod}|${effectiveUtm}`
+    );
+    return `https://trace.icontinental.edu.pe/${code}`;
+  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm]);
+
   const directWhatsAppPreviewUrl = useMemo(() => {
     const cleanPhone = effectivePhone.replace(/\D/g, '') || '51987654321';
     return `https://api.whatsapp.com/send?phone=${encodeURIComponent(cleanPhone)}&text=${encodeURIComponent(effectiveWaMessage)}`;
   }, [effectivePhone, effectiveWaMessage]);
 
   // ===========================================================================
-  // AGREGACIONES PARA LAS 6 TABLAS DE REPORTERÍA
+  // AGREGACIONES PARA LAS 6 SECCIONES DE REPORTERÍA
   // ===========================================================================
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
@@ -509,6 +558,15 @@ export const App: React.FC = () => {
   const purgeableRecordsCount = useMemo(() => {
     return records.filter((r) => isTestRecord(r)).length;
   }, [records]);
+
+  const distinctPeriodsInFilter = useMemo(() => {
+    const set = new Set<string>();
+    filteredRecords.forEach((r) => set.add(r.period));
+    if (set.size === 0 && reportPeriodFilter !== 'all') {
+      set.add(reportPeriodFilter);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [filteredRecords, reportPeriodFilter]);
 
   // 1. Conteo General por Canal
   const channelTotals = useMemo(() => {
@@ -534,7 +592,7 @@ export const App: React.FC = () => {
     return { byChannel: map, grandTotalClicks, grandTotalUnique, chartItems };
   }, [filteredRecords]);
 
-  // 2. Desglose por Canal (Siempre imprime los 4 canales completos)
+  // 2. Desglose por Canal
   const breakdownByChannel = useMemo(() => {
     const channelsOrder: ChannelKey[] = [
       'web_institucional',
@@ -545,15 +603,7 @@ export const App: React.FC = () => {
     return channelsOrder.map((ch) => {
       const rows = filteredRecords
         .filter((r) => r.channel === ch)
-        .sort((a, b) => {
-          if (ch === 'asesor_prospector') {
-            const advCmp = (a.advisor_name || a.subcampaign).localeCompare(
-              b.advisor_name || b.subcampaign
-            );
-            if (advCmp !== 0) return advCmp;
-          }
-          return b.clicks - a.clicks;
-        });
+        .sort((a, b) => b.clicks - a.clicks);
       const totalClicks = rows.reduce((s, r) => s + r.clicks, 0);
       const totalUnique = rows.reduce((s, r) => s + r.unique_visitors, 0);
       return {
@@ -566,33 +616,33 @@ export const App: React.FC = () => {
     });
   }, [filteredRecords]);
 
-  // 3. Resultados por Campaña
-  const resultsByCampaign = useMemo(() => {
+  // 3. Códigos más exitosos (Columna mandatoria: Código)
+  const buildCodesRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
       {
         key: string;
-        channelLabel: string;
+        code: string;
         campaign: string;
         career: string;
+        channelLabel: string;
         period: string;
-        code: string;
         clicks: number;
         unique: number;
       }
     >();
 
-    filteredRecords.forEach((r) => {
+    sourceRows.forEach((r) => {
       const code = `${r.campaign}_${r.period}`;
       const existing = map.get(code);
       if (!existing) {
         map.set(code, {
           key: code,
-          channelLabel: CHANNEL_LABELS[r.channel],
+          code,
           campaign: r.campaign,
           career: r.career,
+          channelLabel: CHANNEL_LABELS[r.channel],
           period: r.period,
-          code,
           clicks: r.clicks,
           unique: r.unique_visitors,
         });
@@ -609,16 +659,22 @@ export const App: React.FC = () => {
     });
 
     return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
-  }, [filteredRecords]);
+  };
 
-  // 4. Resultados por Carrera
-  const resultsByCareer = useMemo(() => {
+  const resultsByCode = useMemo(
+    () => buildCodesRanking(filteredRecords),
+    [filteredRecords]
+  );
+
+  // 4. Resultados por Carrera (Columna mandatoria: Carrera)
+  const buildCareersRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
       {
+        key: string;
         career: string;
-        channelLabel: string;
         campaign: string;
+        channelLabel: string;
         period: string;
         code: string;
         clicks: number;
@@ -626,15 +682,16 @@ export const App: React.FC = () => {
       }
     >();
 
-    filteredRecords.forEach((r) => {
+    sourceRows.forEach((r) => {
       const key = `${r.career}::${r.period}`;
       const code = `${r.campaign}_${r.period}`;
       const existing = map.get(key);
       if (!existing) {
         map.set(key, {
+          key,
           career: r.career,
-          channelLabel: CHANNEL_LABELS[r.channel],
           campaign: r.campaign,
+          channelLabel: CHANNEL_LABELS[r.channel],
           period: r.period,
           code,
           clicks: r.clicks,
@@ -653,10 +710,15 @@ export const App: React.FC = () => {
     });
 
     return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
-  }, [filteredRecords]);
+  };
+
+  const resultsByCareer = useMemo(
+    () => buildCareersRanking(filteredRecords),
+    [filteredRecords]
+  );
 
   // 5. Resultado por Número de WhatsApp
-  const resultsByWhatsApp = useMemo(() => {
+  const buildWhatsAppRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
       {
@@ -667,7 +729,7 @@ export const App: React.FC = () => {
       }
     >();
 
-    filteredRecords.forEach((r) => {
+    sourceRows.forEach((r) => {
       const phone = r.whatsapp_phone || '51987654321';
       const foundWa = waNumbers.find((w) => w.phone_number === phone);
       const foundAdv = advisors.find((a) => a.phone_number === phone);
@@ -689,7 +751,12 @@ export const App: React.FC = () => {
     });
 
     return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
-  }, [filteredRecords, waNumbers, advisors]);
+  };
+
+  const resultsByWhatsApp = useMemo(
+    () => buildWhatsAppRanking(filteredRecords),
+    [filteredRecords, waNumbers, advisors]
+  );
 
   // 6. Resultado por Periodo
   const resultsByPeriod = useMemo(() => {
@@ -698,8 +765,6 @@ export const App: React.FC = () => {
       {
         period: string;
         isActive: boolean;
-        campaignsCount: Set<string>;
-        careersCount: Set<string>;
         clicks: number;
         unique: number;
       }
@@ -709,36 +774,32 @@ export const App: React.FC = () => {
       map.set(p.code, {
         period: p.code,
         isActive: p.is_active,
-        campaignsCount: new Set<string>(),
-        careersCount: new Set<string>(),
         clicks: 0,
         unique: 0,
       });
     });
 
-    filteredRecords.forEach((r) => {
-      const existing = map.get(r.period) || {
-        period: r.period,
-        isActive: r.period === activePeriod,
-        campaignsCount: new Set<string>(),
-        careersCount: new Set<string>(),
-        clicks: 0,
-        unique: 0,
-      };
-      existing.clicks += r.clicks;
-      existing.unique += r.unique_visitors;
-      existing.campaignsCount.add(r.campaign);
-      existing.careersCount.add(r.career);
-      map.set(r.period, existing);
-    });
+    records
+      .filter((r) => r.last_activity_date >= startDate && r.last_activity_date <= endDate)
+      .forEach((r) => {
+        const existing = map.get(r.period) || {
+          period: r.period,
+          isActive: r.period === activePeriod,
+          clicks: 0,
+          unique: 0,
+        };
+        existing.clicks += r.clicks;
+        existing.unique += r.unique_visitors;
+        map.set(r.period, existing);
+      });
 
-    return Array.from(map.values()).sort((a, b) => b.period.localeCompare(a.period));
-  }, [filteredRecords, periods, activePeriod]);
+    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
+  }, [records, startDate, endDate, periods, activePeriod]);
 
   const handleExportReportCsv = () => {
     const headers = [
-      'Canal',
       'Campana',
+      'Canal',
       'Carrera',
       'Periodo',
       'Codigo',
@@ -749,8 +810,8 @@ export const App: React.FC = () => {
       'Fecha_Actividad',
     ];
     const rows = filteredRecords.map((r) => [
-      `"${CHANNEL_LABELS[r.channel]}"`,
       `"${r.campaign}"`,
+      `"${CHANNEL_LABELS[r.channel]}"`,
       `"${r.career.replace(/"/g, '""')}"`,
       `"${r.period}"`,
       `"${r.campaign}_${r.period}"`,
@@ -776,7 +837,7 @@ export const App: React.FC = () => {
     try {
       const created = await DataEngine.createLink({
         channel: genChannel,
-        period: activePeriod, // Siempre usa el Periodo Global Activo
+        period: activePeriod,
         campaign: effectiveCampaign,
         career: genCareer,
         subcampaign: effectiveUtm,
@@ -785,8 +846,9 @@ export const App: React.FC = () => {
         whatsapp_message: effectiveWaMessage,
         is_purgeable: genIsPurgeable,
       });
-      setGenFeedbackUrl(created.normal_url);
-      copyToClipboard(created.normal_url, 'gen-preview');
+      const urlToCopy = genShowShortPreview ? created.short_url : created.normal_url;
+      setGenFeedbackUrl(urlToCopy);
+      copyToClipboard(urlToCopy, 'gen-preview');
       if (genCampaignMode === 'new') {
         setGenSelectedCampaign(effectiveCampaign);
         setGenCampaignMode('select');
@@ -815,38 +877,47 @@ export const App: React.FC = () => {
   };
 
   // ===========================================================================
-  // LOGIN PROTEGIENDO TODA LA APP (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
+  // LOGIN PROTEGIENDO TODA LA APP (Sin autocompletado inicial + Logo IC + Footer)
   // ===========================================================================
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen w-full flex bg-white text-ic-dark">
-        {/* MITAD IZQUIERDA (50%): Imagen Limpia a Pantalla Completa */}
+        {/* MITAD IZQUIERDA (50%) */}
         <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B0F17] overflow-hidden flex-col justify-between p-12">
           <img
             src="https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&w=1600&q=85"
             alt="Instituto Continental"
             className="absolute inset-0 w-full h-full object-cover opacity-55"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17]/90 via-transparent to-[#0B0F17]/50" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17]/90 via-transparent to-[#0B0F17]/40" />
           <div className="absolute top-0 left-0 w-2 h-full bg-ic-red" />
 
-          <div className="relative z-10 flex items-center gap-3">
-            <div className="w-2 h-7 bg-ic-red" />
-            <span className="font-serif font-bold text-xl tracking-tight text-white">
-              TRACE IC
-            </span>
+          <div className="relative z-10">
+            <a href="/app/" className="inline-block bg-white px-3 py-2">
+              <img
+                src={LOGO_IC_NEGRO}
+                alt="Instituto Continental"
+                className="h-7 w-auto"
+              />
+            </a>
           </div>
 
-          <div className="relative z-10">
-            <div className="text-xs font-mono uppercase tracking-widest text-white/80">
-              Instituto Continental
-            </div>
+          <div className="relative z-10 text-xs font-mono uppercase tracking-widest text-white/80">
+            TRACE IC
           </div>
         </div>
 
         {/* MITAD DERECHA (50%): Login Centrado y Minimalista */}
         <div className="w-full lg:w-1/2 flex flex-col justify-between p-8 sm:p-14 bg-white">
-          <div />
+          <div>
+            <a href="/app/" className="inline-block">
+              <img
+                src={LOGO_IC_NEGRO}
+                alt="Instituto Continental"
+                className="h-7 w-auto"
+              />
+            </a>
+          </div>
 
           <div className="w-full max-w-sm mx-auto my-auto space-y-6">
             <div className="space-y-1">
@@ -854,9 +925,6 @@ export const App: React.FC = () => {
               <h1 className="text-3xl font-serif font-bold text-ic-dark">
                 Iniciar Sesión
               </h1>
-              <p className="text-xs text-ic-muted">
-                Plataforma Trace IC
-              </p>
             </div>
 
             {loginError && (
@@ -865,7 +933,7 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <form onSubmit={handleLoginSubmit} autoComplete="off" className="space-y-4">
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
                   Usuario
@@ -875,8 +943,10 @@ export const App: React.FC = () => {
                   <input
                     type="email"
                     required
+                    autoComplete="off"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="Correo institucional"
                     className="w-full pl-10 pr-3 py-2 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark"
                   />
                 </div>
@@ -891,8 +961,10 @@ export const App: React.FC = () => {
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Contraseña"
                     className="w-full pl-10 pr-3 py-2 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark"
                   />
                 </div>
@@ -908,8 +980,22 @@ export const App: React.FC = () => {
             </form>
           </div>
 
-          <div className="text-[11px] text-ic-muted font-mono">
-            trace.icontinental.edu.pe
+          <div className="flex items-center justify-between text-[11px] text-ic-muted border-t border-ic-border pt-4">
+            <a href="/app/">
+              <img
+                src={LOGO_IC_NEGRO}
+                alt="Instituto Continental"
+                className="h-5 w-auto"
+              />
+            </a>
+            <a
+              href="https://lumine.pe"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-ic-dark transition-colors"
+            >
+              Copyright © 2026
+            </a>
           </div>
         </div>
       </div>
@@ -919,18 +1005,27 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-ic-dark flex flex-col">
       {/* =====================================================================
-          CABECERA SUPERIOR
+          CABECERA SUPERIOR CON LOGO OFICIAL (href a inicio)
          ===================================================================== */}
       <header className="bg-white border-b border-ic-border sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Izquierda: Marca + Navegación Central */}
+          {/* Izquierda: Logo Oficial + Navegación */}
           <div className="flex items-center gap-8 h-full">
-            <div className="flex items-center gap-3">
-              <div className="w-1.5 h-7 bg-ic-red" />
-              <span className="font-serif font-bold text-lg tracking-tight text-ic-dark">
-                TRACE IC
-              </span>
-            </div>
+            <a
+              href="/app/"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveModule('reports');
+              }}
+              className="flex items-center gap-3"
+              title="Ir a Inicio"
+            >
+              <img
+                src={LOGO_IC_NEGRO}
+                alt="Instituto Continental"
+                className="h-7 w-auto"
+              />
+            </a>
 
             <nav className="flex items-center h-full space-x-6">
               <button
@@ -1008,7 +1103,7 @@ export const App: React.FC = () => {
       </header>
 
       {/* =====================================================================
-          MODAL DE CONFIRMACIÓN DE ELIMINACIÓN ("¿Seguro que quieres eliminar?")
+          MODAL DE CONFIRMACIÓN DE ELIMINACIÓN
          ===================================================================== */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
@@ -1061,7 +1156,7 @@ export const App: React.FC = () => {
       )}
 
       {/* =====================================================================
-          MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS POR RANGO DE FECHAS
+          MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS
          ===================================================================== */}
       {isPurgeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
@@ -1203,11 +1298,11 @@ export const App: React.FC = () => {
          ===================================================================== */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-10">
         {/* ===================================================================
-            MÓDULO 01: REPORTERÍA (LAS 6 SECCIONES EN EL ORDEN SOLICITADO)
+            MÓDULO 01: REPORTERÍA
            =================================================================== */}
         {activeModule === 'reports' && (
           <>
-            {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón con Dropdown + Periodo + Acciones */}
+            {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón + Periodo (Preselect en Activo) */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-ic-border pb-5">
               <h1 className="text-2xl font-serif font-bold text-ic-dark">
                 Reportería
@@ -1329,7 +1424,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Selector de PERIODO */}
+                {/* Selector de PERIODO (Preselect en Periodo Activo; si es 'all' muestra Acordeón por Periodo) */}
                 <div className="flex items-center gap-1.5 bg-white border border-ic-border px-3 py-2 text-xs">
                   <span className="text-ic-muted font-medium">Periodo:</span>
                   <select
@@ -1337,12 +1432,12 @@ export const App: React.FC = () => {
                     onChange={(e) => setReportPeriodFilter(e.target.value)}
                     className="font-mono font-bold text-ic-dark bg-transparent focus:outline-none"
                   >
-                    <option value="all">Todos</option>
                     {periods.map((p) => (
                       <option key={p.code} value={p.code}>
                         {p.code} {p.is_active ? '(Activo)' : ''}
                       </option>
                     ))}
+                    <option value="all">Todos (Agrupar por Periodo)</option>
                   </select>
                 </div>
 
@@ -1377,7 +1472,7 @@ export const App: React.FC = () => {
             </div>
 
             {/* ===============================================================
-                1. CONTEO GENERAL POR CANAL (Con Gráfico de Barras y Scroll al clicar)
+                1. CONTEO GENERAL POR CANAL (Con Gráfico de Barras y Scroll)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between">
@@ -1445,7 +1540,7 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                2. DESGLOSE POR CANAL (Siempre imprime todo; sin gráfico por canal)
+                2. DESGLOSE POR CANAL (Columna Mandatoria: Campaña + Copa 1er puesto)
                =============================================================== */}
             <section className="space-y-5">
               <div className="flex items-center gap-3">
@@ -1458,6 +1553,78 @@ export const App: React.FC = () => {
               {breakdownByChannel.map((block) => {
                 const isHighlighted = highlightedChannel === block.channel;
                 const isAdvisorChannel = block.channel === 'asesor_prospector';
+
+                const renderChannelTable = (rows: SubcampaignRecord[]) => (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                          <th className="py-2.5 px-4 text-ic-dark font-bold">Campaña</th>
+                          {isAdvisorChannel && <th className="py-2.5 px-4">Asesor</th>}
+                          <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Carrera</th>
+                          <th className="py-2.5 px-4">Periodo</th>
+                          <th className="py-2.5 px-4">Código</th>
+                          <th className="py-2.5 px-4 text-right">Clics</th>
+                          <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 text-xs">
+                        {rows.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={isAdvisorChannel ? 9 : 8}
+                              className="py-4 px-6 text-ic-muted"
+                            >
+                              Sin registros en el periodo seleccionado.
+                            </td>
+                          </tr>
+                        ) : (
+                          rows.map((row, idx) => {
+                            const code = `${row.campaign}_${row.period}`;
+                            return (
+                              <tr key={row.id} className="hover:bg-gray-50">
+                                <RankCell index={idx} />
+                                <td className="py-2.5 px-4 font-mono font-bold text-ic-dark">
+                                  {row.campaign}
+                                </td>
+                                {isAdvisorChannel && (
+                                  <td className="py-2.5 px-4 font-semibold text-ic-dark">
+                                    {row.advisor_name || row.subcampaign}
+                                  </td>
+                                )}
+                                <td className="py-2.5 px-4 text-ic-slate">
+                                  {block.channel === 'web_institucional' ||
+                                  block.channel === 'asesor_prospector'
+                                    ? block.channelLabel
+                                    : `${block.channelLabel} (${row.subcampaign})`}
+                                </td>
+                                <td className="py-2.5 px-4 font-medium text-ic-dark">
+                                  {row.career}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono text-ic-slate">
+                                  {row.period}
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                                    {code}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4 text-right font-bold text-ic-dark tabular-nums">
+                                  {row.clicks.toLocaleString()}
+                                </td>
+                                <td className="py-2.5 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                                  {row.unique_visitors.toLocaleString()}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
 
                 return (
                   <div
@@ -1481,141 +1648,170 @@ export const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                            {isAdvisorChannel && (
-                              <th className="py-2.5 pl-6 pr-4">Asesor</th>
-                            )}
-                            <th className={`py-2.5 ${isAdvisorChannel ? 'px-4' : 'pl-6 pr-4'}`}>
-                              Canal
-                            </th>
-                            <th className="py-2.5 px-4">Campaña</th>
-                            <th className="py-2.5 px-4">Carrera</th>
-                            <th className="py-2.5 px-4">Periodo</th>
-                            <th className="py-2.5 px-4">Código</th>
-                            <th className="py-2.5 px-4 text-right">Clics</th>
-                            <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 text-xs">
-                          {block.rows.length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={isAdvisorChannel ? 8 : 7}
-                                className="py-4 px-6 text-ic-muted"
+                    {reportPeriodFilter !== 'all' ? (
+                      renderChannelTable(block.rows)
+                    ) : (
+                      <div className="divide-y divide-ic-border">
+                        {distinctPeriodsInFilter.map((per) => {
+                          const perRows = block.rows.filter((r) => r.period === per);
+                          const perClicks = perRows.reduce((s, r) => s + r.clicks, 0);
+                          const perUnique = perRows.reduce((s, r) => s + r.unique_visitors, 0);
+                          const accKey = `ch-${block.channel}-${per}`;
+                          const isOpen = openAccordions[accKey] ?? true;
+
+                          return (
+                            <div key={accKey}>
+                              <button
+                                type="button"
+                                onClick={() => toggleAccordion(accKey)}
+                                className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
                               >
-                                Sin registros en el periodo seleccionado.
-                              </td>
-                            </tr>
-                          ) : (
-                            block.rows.map((row) => {
-                              const code = `${row.campaign}_${row.period}`;
-                              return (
-                                <tr key={row.id} className="hover:bg-gray-50">
-                                  {isAdvisorChannel && (
-                                    <td className="py-2.5 pl-6 pr-4 font-semibold text-ic-dark">
-                                      {row.advisor_name || row.subcampaign}
-                                    </td>
+                                <div className="flex items-center gap-2">
+                                  {isOpen ? (
+                                    <ChevronDown className="w-4 h-4 text-ic-red" />
+                                  ) : (
+                                    <ChevronRight className="w-4 h-4 text-ic-muted" />
                                   )}
-                                  <td
-                                    className={`py-2.5 ${
-                                      isAdvisorChannel ? 'px-4' : 'pl-6 pr-4'
-                                    } text-ic-slate`}
-                                  >
-                                    {block.channel === 'web_institucional' ||
-                                    block.channel === 'asesor_prospector'
-                                      ? block.channelLabel
-                                      : `${block.channelLabel} (${row.subcampaign})`}
-                                  </td>
-                                  <td className="py-2.5 px-4 font-mono font-semibold text-ic-dark">
-                                    {row.campaign}
-                                  </td>
-                                  <td className="py-2.5 px-4 font-medium text-ic-dark">
-                                    {row.career}
-                                  </td>
-                                  <td className="py-2.5 px-4 font-mono text-ic-slate">
-                                    {row.period}
-                                  </td>
-                                  <td className="py-2.5 px-4">
-                                    <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
-                                      {code}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-4 text-right font-bold text-ic-dark tabular-nums">
-                                    {row.clicks.toLocaleString()}
-                                  </td>
-                                  <td className="py-2.5 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                                    {row.unique_visitors.toLocaleString()}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                                  <span className="text-xs font-semibold uppercase text-ic-muted">
+                                    Periodo:
+                                  </span>
+                                  <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
+                                    {per}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-4 text-xs tabular-nums">
+                                  <span className="font-bold text-ic-dark">
+                                    {perClicks.toLocaleString()} clics
+                                  </span>
+                                  <span className="text-ic-muted">
+                                    {perUnique.toLocaleString()} únicos
+                                  </span>
+                                </div>
+                              </button>
+                              {isOpen && renderChannelTable(perRows)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </section>
 
             {/* ===============================================================
-                3. RESULTADOS POR CAMPAÑA (Con Gráfico de Barras)
+                3. CÓDIGOS MÁS EXITOSOS (Columna Mandatoria: Código + Gráfico)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
                 <div className="w-1.5 h-5 bg-ic-red" />
                 <h2 className="text-base font-serif font-bold text-ic-dark">
-                  3. Resultados por Campaña
+                  3. Códigos más exitosos
                 </h2>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <th className="py-2.5 pl-6 pr-4">Canal</th>
-                      <th className="py-2.5 px-4">Campaña</th>
-                      <th className="py-2.5 px-4">Carrera</th>
-                      <th className="py-2.5 px-4">Periodo</th>
-                      <th className="py-2.5 px-4">Código</th>
-                      <th className="py-2.5 px-4 text-right">Clics</th>
-                      <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ic-border text-xs">
-                    {resultsByCampaign.map((item) => (
-                      <tr key={item.key} className="hover:bg-gray-50">
-                        <td className="py-3 pl-6 pr-4 text-ic-slate">{item.channelLabel}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-ic-dark">
-                          {item.campaign}
-                        </td>
-                        <td className="py-3 px-4 font-medium text-ic-dark">{item.career}</td>
-                        <td className="py-3 px-4 font-mono text-ic-slate">{item.period}</td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
-                            {item.code}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
-                          {item.clicks.toLocaleString()}
-                        </td>
-                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                          {item.unique.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const renderCodesTable = (items: ReturnType<typeof buildCodesRanking>) => (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                          <th className="py-2.5 px-4 text-ic-dark font-bold">Código</th>
+                          <th className="py-2.5 px-4">Campaña</th>
+                          <th className="py-2.5 px-4">Carrera</th>
+                          <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Periodo</th>
+                          <th className="py-2.5 px-4 text-right">Clics</th>
+                          <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ic-border text-xs">
+                        {items.map((item, idx) => (
+                          <tr key={item.key} className="hover:bg-gray-50">
+                            <RankCell index={idx} />
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-xs">
+                                {item.code}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-mono font-bold text-ic-dark">
+                              {item.campaign}
+                            </td>
+                            <td className="py-3 px-4 font-medium text-ic-dark">
+                              {item.career}
+                            </td>
+                            <td className="py-3 px-4 text-ic-slate">{item.channelLabel}</td>
+                            <td className="py-3 px-4 font-mono text-ic-slate">
+                              {item.period}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                              {item.clicks.toLocaleString()}
+                            </td>
+                            <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                              {item.unique.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+
+                return reportPeriodFilter !== 'all' ? (
+                  renderCodesTable(resultsByCode)
+                ) : (
+                  <div className="divide-y divide-ic-border">
+                    {distinctPeriodsInFilter.map((per) => {
+                      const perItems = buildCodesRanking(
+                        filteredRecords.filter((r) => r.period === per)
+                      );
+                      const perClicks = perItems.reduce((s, i) => s + i.clicks, 0);
+                      const perUnique = perItems.reduce((s, i) => s + i.unique, 0);
+                      const accKey = `codes-${per}`;
+                      const isOpen = openAccordions[accKey] ?? true;
+
+                      return (
+                        <div key={accKey}>
+                          <button
+                            type="button"
+                            onClick={() => toggleAccordion(accKey)}
+                            className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isOpen ? (
+                                <ChevronDown className="w-4 h-4 text-ic-red" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-ic-muted" />
+                              )}
+                              <span className="text-xs font-semibold uppercase text-ic-muted">
+                                Periodo:
+                              </span>
+                              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
+                                {per}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs tabular-nums">
+                              <span className="font-bold text-ic-dark">
+                                {perClicks.toLocaleString()} clics
+                              </span>
+                              <span className="text-ic-muted">
+                                {perUnique.toLocaleString()} únicos
+                              </span>
+                            </div>
+                          </button>
+                          {isOpen && renderCodesTable(perItems)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               <MinimalBarChart
-                title="Comparativa Visual por Campaña"
-                items={resultsByCampaign.map((c) => ({
-                  label: c.campaign,
-                  sublabel: c.period,
+                title="Comparativa Visual por Código"
+                items={resultsByCode.map((c) => ({
+                  label: c.code,
                   clicks: c.clicks,
                   unique: c.unique,
                 }))}
@@ -1623,7 +1819,7 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                4. RESULTADOS POR CARRERA (Con Gráfico de Barras)
+                4. RESULTADOS POR CARRERA (Columna Mandatoria: Carrera + Gráfico)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
@@ -1633,42 +1829,103 @@ export const App: React.FC = () => {
                 </h2>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <th className="py-2.5 pl-6 pr-4">Canal</th>
-                      <th className="py-2.5 px-4">Campaña</th>
-                      <th className="py-2.5 px-4">Carrera</th>
-                      <th className="py-2.5 px-4">Periodo</th>
-                      <th className="py-2.5 px-4">Código</th>
-                      <th className="py-2.5 px-4 text-right">Clics</th>
-                      <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ic-border text-xs">
-                    {resultsByCareer.map((item) => (
-                      <tr key={`${item.career}-${item.period}`} className="hover:bg-gray-50">
-                        <td className="py-3 pl-6 pr-4 text-ic-slate">{item.channelLabel}</td>
-                        <td className="py-3 px-4 font-mono text-ic-dark">{item.campaign}</td>
-                        <td className="py-3 px-4 font-semibold text-ic-dark">{item.career}</td>
-                        <td className="py-3 px-4 font-mono text-ic-slate">{item.period}</td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
-                            {item.code}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
-                          {item.clicks.toLocaleString()}
-                        </td>
-                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                          {item.unique.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const renderCareersTable = (items: ReturnType<typeof buildCareersRanking>) => (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                          <th className="py-2.5 px-4 text-ic-dark font-bold">Carrera</th>
+                          <th className="py-2.5 px-4">Campaña</th>
+                          <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Periodo</th>
+                          <th className="py-2.5 px-4">Código</th>
+                          <th className="py-2.5 px-4 text-right">Clics</th>
+                          <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ic-border text-xs">
+                        {items.map((item, idx) => (
+                          <tr key={item.key} className="hover:bg-gray-50">
+                            <RankCell index={idx} />
+                            <td className="py-3 px-4 font-bold text-ic-dark">
+                              {item.career}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-ic-dark">
+                              {item.campaign}
+                            </td>
+                            <td className="py-3 px-4 text-ic-slate">{item.channelLabel}</td>
+                            <td className="py-3 px-4 font-mono text-ic-slate">
+                              {item.period}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                                {item.code}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                              {item.clicks.toLocaleString()}
+                            </td>
+                            <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                              {item.unique.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+
+                return reportPeriodFilter !== 'all' ? (
+                  renderCareersTable(resultsByCareer)
+                ) : (
+                  <div className="divide-y divide-ic-border">
+                    {distinctPeriodsInFilter.map((per) => {
+                      const perItems = buildCareersRanking(
+                        filteredRecords.filter((r) => r.period === per)
+                      );
+                      const perClicks = perItems.reduce((s, i) => s + i.clicks, 0);
+                      const perUnique = perItems.reduce((s, i) => s + i.unique, 0);
+                      const accKey = `careers-${per}`;
+                      const isOpen = openAccordions[accKey] ?? true;
+
+                      return (
+                        <div key={accKey}>
+                          <button
+                            type="button"
+                            onClick={() => toggleAccordion(accKey)}
+                            className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isOpen ? (
+                                <ChevronDown className="w-4 h-4 text-ic-red" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-ic-muted" />
+                              )}
+                              <span className="text-xs font-semibold uppercase text-ic-muted">
+                                Periodo:
+                              </span>
+                              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
+                                {per}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs tabular-nums">
+                              <span className="font-bold text-ic-dark">
+                                {perClicks.toLocaleString()} clics
+                              </span>
+                              <span className="text-ic-muted">
+                                {perUnique.toLocaleString()} únicos
+                              </span>
+                            </div>
+                          </button>
+                          {isOpen && renderCareersTable(perItems)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               <MinimalBarChart
                 title="Comparativa Visual por Carrera"
@@ -1682,7 +1939,7 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                5. RESULTADO POR NÚMERO DE WHATSAPP (Sencillo, sin gráfico)
+                5. RESULTADO POR NÚMERO DE WHATSAPP Y 6. RESULTADO POR PERIODO
                =============================================================== */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <section className="bg-white border border-ic-border">
@@ -1693,36 +1950,84 @@ export const App: React.FC = () => {
                   </h2>
                 </div>
 
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <th className="py-2.5 pl-6 pr-4">Teléfono</th>
-                      <th className="py-2.5 px-4">Etiqueta / Responsable</th>
-                      <th className="py-2.5 px-4 text-right">Clics</th>
-                      <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ic-border text-xs">
-                    {resultsByWhatsApp.map((item) => (
-                      <tr key={item.phone} className="hover:bg-gray-50">
-                        <td className="py-3 pl-6 pr-4 font-mono font-bold text-ic-red">
-                          +{item.phone}
-                        </td>
-                        <td className="py-3 px-4 font-medium text-ic-dark">{item.label}</td>
-                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
-                          {item.clicks.toLocaleString()}
-                        </td>
-                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                          {item.unique.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {(() => {
+                  const renderWaTable = (items: ReturnType<typeof buildWhatsAppRanking>) => (
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                          <th className="py-2.5 px-4 text-ic-dark font-bold">Teléfono</th>
+                          <th className="py-2.5 px-4">Etiqueta / Responsable</th>
+                          <th className="py-2.5 px-4 text-right">Clics</th>
+                          <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ic-border text-xs">
+                        {items.map((item, idx) => (
+                          <tr key={item.phone} className="hover:bg-gray-50">
+                            <RankCell index={idx} />
+                            <td className="py-3 px-4 font-mono font-bold text-ic-dark">
+                              +{item.phone}
+                            </td>
+                            <td className="py-3 px-4 font-medium text-ic-slate">
+                              {item.label}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                              {item.clicks.toLocaleString()}
+                            </td>
+                            <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                              {item.unique.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+
+                  return reportPeriodFilter !== 'all' ? (
+                    renderWaTable(resultsByWhatsApp)
+                  ) : (
+                    <div className="divide-y divide-ic-border">
+                      {distinctPeriodsInFilter.map((per) => {
+                        const perItems = buildWhatsAppRanking(
+                          filteredRecords.filter((r) => r.period === per)
+                        );
+                        const perClicks = perItems.reduce((s, i) => s + i.clicks, 0);
+                        const accKey = `wa-${per}`;
+                        const isOpen = openAccordions[accKey] ?? true;
+
+                        return (
+                          <div key={accKey}>
+                            <button
+                              type="button"
+                              onClick={() => toggleAccordion(accKey)}
+                              className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isOpen ? (
+                                  <ChevronDown className="w-4 h-4 text-ic-red" />
+                                ) : (
+                                  <ChevronRight className="w-4 h-4 text-ic-muted" />
+                                )}
+                                <span className="text-xs font-mono font-bold text-ic-red">
+                                  Periodo {per}
+                                </span>
+                              </div>
+                              <span className="text-xs font-bold tabular-nums">
+                                {perClicks.toLocaleString()} clics
+                              </span>
+                            </button>
+                            {isOpen && renderWaTable(perItems)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </section>
 
               {/* =============================================================
-                  6. RESULTADO POR PERIODO (Sencillo, sin gráfico)
+                  6. RESULTADO POR PERIODO
                  ============================================================= */}
               <section className="bg-white border border-ic-border">
                 <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
@@ -1735,16 +2040,18 @@ export const App: React.FC = () => {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <th className="py-2.5 pl-6 pr-4">Periodo</th>
+                      <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                      <th className="py-2.5 px-4 text-ic-dark font-bold">Periodo</th>
                       <th className="py-2.5 px-4">Estado</th>
                       <th className="py-2.5 px-4 text-right">Clics</th>
                       <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ic-border text-xs">
-                    {resultsByPeriod.map((item) => (
+                    {resultsByPeriod.map((item, idx) => (
                       <tr key={item.period} className="hover:bg-gray-50">
-                        <td className="py-3 pl-6 pr-4 font-mono font-bold text-ic-dark">
+                        <RankCell index={idx} />
+                        <td className="py-3 px-4 font-mono font-bold text-ic-dark">
                           {item.period}
                         </td>
                         <td className="py-3 px-4">
@@ -1772,7 +2079,7 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 02: GENERADOR DE ENLACES (Periodo Informativo + Carrera)
+            MÓDULO 02: GENERADOR DE ENLACES (Con Botón Tijera Acortador)
            =================================================================== */}
         {activeModule === 'generator' && (
           <div className="space-y-6">
@@ -1807,7 +2114,7 @@ export const App: React.FC = () => {
                         Link Ads (TikTok, Google Display, PMax, YouTube)
                       </option>
                       <option value="mailing_sms_chattigo">
-                        Mailing / SMS / Chattigo (/CRM)
+                        Mailing / SMS / Chattigo
                       </option>
                       <option value="asesor_prospector">Asesor / Prospector</option>
                     </select>
@@ -1960,10 +2267,10 @@ export const App: React.FC = () => {
                       </select>
                     </div>
 
-                    {/* 4. PERIODO (SOLO INFORMATIVO — REGLA GLOBAL) */}
+                    {/* PERIODO (SOLO INFORMATIVO) */}
                     <div className="pt-2 border-t border-ic-border flex items-center justify-between text-xs">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
-                        Periodo Activo (Global):
+                        Periodo Activo:
                       </span>
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 bg-white border border-ic-border font-mono font-bold text-ic-red">
@@ -1976,7 +2283,7 @@ export const App: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Número de WhatsApp (Para canales distintos de Asesor) */}
+                  {/* Número de WhatsApp */}
                   {genChannel !== 'asesor_prospector' && (
                     <div>
                       <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
@@ -2014,7 +2321,7 @@ export const App: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* ENLACE FINAL GENERADO POR EL SISTEMA */}
+                  {/* ENLACE FINAL + BOTÓN ROJO ÉNFASIS CON ICONO DE TIJERA (ACORTADOR) */}
                   <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-2.5">
                     <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
                       Enlace Generado:
@@ -2023,22 +2330,58 @@ export const App: React.FC = () => {
                       {generatedSystemUrl}
                     </div>
 
+                    {genShowShortPreview && (
+                      <div className="p-2 bg-ic-redSoft border border-ic-red/30 font-mono text-xs text-ic-red font-bold flex items-center justify-between">
+                        <span>{previewShortUrl}</span>
+                        <span className="text-[10px] uppercase tracking-wider">
+                          Versión Corta
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(generatedSystemUrl, 'gen-preview')}
-                        className="px-3 py-1.5 bg-ic-dark text-white text-xs font-medium flex items-center gap-1.5"
-                      >
-                        {copiedKey === 'gen-preview' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" /> Copiado
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" /> Copiar Enlace
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            copyToClipboard(
+                              genShowShortPreview ? previewShortUrl : generatedSystemUrl,
+                              'gen-preview'
+                            )
+                          }
+                          className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center gap-1.5"
+                        >
+                          {copiedKey === 'gen-preview' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" /> Copiado
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" /> Copiar
+                            </>
+                          )}
+                        </button>
+
+                        {/* Botón pequeño tipo checkbox rojo énfasis con relleno de SVG de tijera */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !genShowShortPreview;
+                            setGenShowShortPreview(next);
+                            if (next) {
+                              copyToClipboard(previewShortUrl, 'short-toggle');
+                            }
+                          }}
+                          className={`p-1.5 border transition-colors flex items-center gap-1 text-xs font-medium ${
+                            genShowShortPreview
+                              ? 'bg-ic-red text-white border-ic-red ring-2 ring-ic-red/30'
+                              : 'bg-ic-red hover:bg-ic-redHover text-white border-ic-red'
+                          }`}
+                          title="Generar y copiar versión corta del enlace"
+                        >
+                          <Scissors className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
 
                       <label className="flex items-center gap-1.5 text-xs text-ic-dark cursor-pointer">
                         <input
@@ -2048,7 +2391,7 @@ export const App: React.FC = () => {
                           className="accent-ic-red"
                         />
                         <FlaskConical className="w-3.5 h-3.5 text-ic-red" />
-                        <span>Es prueba (depurable)</span>
+                        <span>Es prueba</span>
                       </label>
                     </div>
                   </div>
@@ -2058,18 +2401,18 @@ export const App: React.FC = () => {
                     className="w-full py-3 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
-                    Guardar y Copiar Enlace
+                    Guardar Enlace
                   </button>
 
                   {genFeedbackUrl && (
                     <div className="p-2.5 bg-green-50 border border-green-200 text-xs text-green-900 font-mono truncate">
-                      Enlace copiado y guardado.
+                      Guardado: {genFeedbackUrl}
                     </div>
                   )}
                 </form>
               </div>
 
-              {/* LISTA DE ENLACES GENERADOS */}
+              {/* LISTA DE ENLACES GENERADOS (Con texto acortado debajo y botón rojo Acortado debajo de Copiar) */}
               <div className="lg:col-span-7 bg-white border border-ic-border">
                 <div className="p-4 border-b border-ic-border flex items-center justify-between gap-3">
                   <h2 className="text-base font-serif font-bold text-ic-dark">
@@ -2100,9 +2443,9 @@ export const App: React.FC = () => {
                     .map((link) => (
                       <div
                         key={link.id}
-                        className="p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        className="p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                       >
-                        <div className="space-y-1 min-w-0">
+                        <div className="space-y-1.5 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] font-semibold uppercase px-2 py-0.5 bg-gray-100 text-ic-dark">
                               {CHANNEL_LABELS[link.channel]}
@@ -2120,8 +2463,15 @@ export const App: React.FC = () => {
                             )}
                           </div>
 
+                          {/* Versión completa del enlace */}
                           <div className="font-mono text-xs text-ic-dark break-all">
                             {link.normal_url}
+                          </div>
+
+                          {/* Versión acortada impresa en texto debajo de la completa */}
+                          <div className="font-mono text-xs font-bold text-ic-red flex items-center gap-1.5">
+                            <Scissors className="w-3 h-3" />
+                            <span>{link.short_url}</span>
                           </div>
 
                           <div className="text-[11px] text-ic-muted truncate">
@@ -2129,51 +2479,73 @@ export const App: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <button
-                            onClick={() => copyToClipboard(link.normal_url, `link-${link.id}`)}
-                            className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center gap-1"
-                          >
-                            {copiedKey === `link-${link.id}` ? (
-                              <>
-                                <Check className="w-3.5 h-3.5" /> Copiado
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3.5 h-3.5" /> Copiar
-                              </>
-                            )}
-                          </button>
+                        <div className="flex items-start gap-2 flex-shrink-0">
+                          {/* Columna con Copiar negro arriba y botón rojo Acortado debajo */}
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              onClick={() => copyToClipboard(link.normal_url, `link-${link.id}`)}
+                              className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
+                            >
+                              {copiedKey === `link-${link.id}` ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5" /> Copiado
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" /> Copiar
+                                </>
+                              )}
+                            </button>
 
-                          <button
-                            onClick={() => {
-                              setQrSelectedUrl(link.normal_url);
-                              setActiveModule('tools');
-                            }}
-                            className="p-1.5 border border-ic-border bg-white hover:text-ic-red"
-                            title="Código QR"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                          </button>
-
-                          {!link.is_master_route && (
                             <button
                               onClick={() =>
-                                setConfirmDelete({
-                                  title: '¿Seguro que quieres eliminar este enlace?',
-                                  description: `Se eliminará ${link.campaign}_${link.period} (${link.career}).`,
-                                  onConfirm: async () => {
-                                    await DataEngine.deleteLink(link.id);
-                                    refreshLocalState();
-                                  },
-                                })
+                                copyToClipboard(link.short_url, `short-${link.id}`)
                               }
-                              className="p-1.5 border border-ic-border bg-white text-ic-muted hover:text-ic-red"
-                              title="Eliminar enlace"
+                              className="px-3 py-1.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              {copiedKey === `short-${link.id}` ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5" /> Copiado
+                                </>
+                              ) : (
+                                <>
+                                  <Scissors className="w-3.5 h-3.5" /> Acortado
+                                </>
+                              )}
                             </button>
-                          )}
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              onClick={() => {
+                                setQrSelectedUrl(link.short_url);
+                                setActiveModule('tools');
+                              }}
+                              className="p-1.5 border border-ic-border bg-white hover:text-ic-red"
+                              title="Código QR"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                            </button>
+
+                            {!link.is_master_route && (
+                              <button
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    title: '¿Seguro que quieres eliminar este enlace?',
+                                    description: `Se eliminará ${link.campaign}_${link.period} (${link.career}).`,
+                                    onConfirm: async () => {
+                                      await DataEngine.deleteLink(link.id);
+                                      refreshLocalState();
+                                    },
+                                  })
+                                }
+                                className="p-1.5 border border-ic-border bg-white text-ic-muted hover:text-ic-red"
+                                title="Eliminar enlace"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2184,7 +2556,7 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 03: CONFIGURACIÓN (Periodos, Carreras, Asesores, WhatsApp, QR)
+            MÓDULO 03: CONFIGURACIÓN
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
@@ -2195,7 +2567,7 @@ export const App: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* 1. GESTOR DE PERIODOS (ESTADO GLOBAL) */}
+              {/* 1. GESTOR DE PERIODOS */}
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-ic-border pb-3">
                   <div className="flex items-center gap-2">
@@ -2219,6 +2591,7 @@ export const App: React.FC = () => {
                     }
                     try {
                       await DataEngine.createPeriod(newPeriodInput, true);
+                      setReportPeriodFilter(newPeriodInput);
                       setNewPeriodInput('');
                       refreshLocalState();
                     } catch (err: unknown) {
@@ -2275,6 +2648,7 @@ export const App: React.FC = () => {
                             type="button"
                             onClick={async () => {
                               await DataEngine.activatePeriod(p.code);
+                              setReportPeriodFilter(p.code);
                               refreshLocalState();
                             }}
                             className="px-2.5 py-1 border border-ic-border bg-white hover:bg-gray-100 text-[11px] font-medium"
@@ -2592,8 +2966,8 @@ export const App: React.FC = () => {
                   className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                 >
                   {links.map((l) => (
-                    <option key={l.id} value={l.normal_url}>
-                      {l.campaign}_{l.period} — {l.career}
+                    <option key={l.id} value={l.short_url}>
+                      {l.campaign}_{l.period} — {l.career} ({l.short_code})
                     </option>
                   ))}
                 </select>
@@ -2708,6 +3082,39 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* =====================================================================
+          FOOTER MINIMALISTA (Logo pequeño a la izquierda href inicio + Copyright a la derecha href lumine.pe)
+         ===================================================================== */}
+      <footer className="bg-white border-t border-ic-border mt-12">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between text-xs text-ic-muted">
+          <a
+            href="/app/"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveModule('reports');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="inline-flex items-center"
+            title="Ir a Inicio"
+          >
+            <img
+              src={LOGO_IC_NEGRO}
+              alt="Instituto Continental"
+              className="h-5 w-auto"
+            />
+          </a>
+
+          <a
+            href="https://lumine.pe"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-ic-dark transition-colors font-medium"
+          >
+            Copyright © 2026
+          </a>
+        </div>
+      </footer>
     </div>
   );
 };

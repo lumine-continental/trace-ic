@@ -135,6 +135,9 @@ function ensureSchemaUpgrades(\PDO $pdo): void
         if (!in_array('advisor_name', $colsLinks, true)) {
             $pdo->exec("ALTER TABLE `links` ADD COLUMN `advisor_name` VARCHAR(100) NULL DEFAULT NULL");
         }
+        if (!in_array('short_code', $colsLinks, true)) {
+            $pdo->exec("ALTER TABLE `links` ADD COLUMN `short_code` VARCHAR(32) NULL DEFAULT NULL");
+        }
 
         // 6. Asegurar columnas en `click_events`
         $colsEvents = $pdo->query("SHOW COLUMNS FROM `click_events`")->fetchAll(\PDO::FETCH_COLUMN);
@@ -337,9 +340,14 @@ try {
             if ($isPurgeable && empty($row['is_master_route'])) {
                 $purgeableKeys[$k] = true;
             }
+            $shortCode = !empty($row['short_code'])
+                ? (string) $row['short_code']
+                : ('ic-' . substr(md5($row['id'] . '|' . $row['slug']), 0, 6));
             return [
                 'id'               => (int) $row['id'],
                 'slug'             => (string) $row['slug'],
+                'short_code'       => $shortCode,
+                'short_url'        => 'https://trace.icontinental.edu.pe/' . $shortCode,
                 'normal_url'       => (string) $row['normal_url'],
                 'title'            => (string) $row['title'],
                 'channel'          => (string) $row['channel'],
@@ -560,6 +568,10 @@ try {
         $subcampaign = trim((string) ($body['subcampaign'] ?? 'Portal Web'));
         $normalUrl = trim((string) ($body['normal_url'] ?? ''));
         $slug = trim((string) ($body['slug'] ?? ''));
+        $shortCode = trim((string) ($body['short_code'] ?? ''));
+        if ($shortCode === '') {
+            $shortCode = 'ic-' . substr(md5($slug . '|' . uniqid()), 0, 6);
+        }
         $isPurgeable = !empty($body['is_purgeable']) ? 1 : 0;
 
         $pdo->prepare('INSERT IGNORE INTO campaigns (name) VALUES (:name)')->execute(['name' => $campaign]);
@@ -573,12 +585,12 @@ try {
 
         $stmt = $pdo->prepare("
             INSERT INTO links (
-                slug, normal_url, has_custom_alias, title, channel,
+                slug, short_code, normal_url, has_custom_alias, title, channel,
                 period, campaign, career, subcampaign, advisor_name,
                 destination_type, destination_url, whatsapp_phone,
                 whatsapp_message, is_master_route, is_purgeable, status, created_at
             ) VALUES (
-                :slug, :normal_url, 0, :title, :channel,
+                :slug, :short_code, :normal_url, 0, :title, :channel,
                 :period, :campaign, :career, :subcampaign, :advisor_name,
                 :destination_type, :destination_url, :whatsapp_phone,
                 :whatsapp_message, 0, :is_purgeable, 'active', CURRENT_DATE
@@ -586,6 +598,7 @@ try {
         ");
         $stmt->execute([
             'slug'             => $slug,
+            'short_code'       => $shortCode,
             'normal_url'       => $normalUrl,
             'title'            => trim((string) ($body['title'] ?? "{$campaign}_{$period} - {$career}")),
             'channel'          => $channel,

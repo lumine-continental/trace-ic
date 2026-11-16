@@ -59,10 +59,17 @@ try {
         // Ignorar si no existe
     }
 
-    // Buscar ruta base o enlace
-    $stmt = $pdo->prepare('SELECT * FROM links WHERE LOWER(slug) = LOWER(:slug) LIMIT 1');
-    $stmt->execute(['slug' => $slug]);
-    $link = $stmt->fetch();
+    // Buscar ruta base o enlace (incluyendo versión acortada short_code estilo Bitly)
+    $link = false;
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM links WHERE LOWER(slug) = LOWER(:slug) OR LOWER(short_code) = LOWER(:sc) LIMIT 1');
+        $stmt->execute(['slug' => $slug, 'sc' => $slug]);
+        $link = $stmt->fetch();
+    } catch (\Throwable $e) {
+        $stmt = $pdo->prepare('SELECT * FROM links WHERE LOWER(slug) = LOWER(:slug) LIMIT 1');
+        $stmt->execute(['slug' => $slug]);
+        $link = $stmt->fetch();
+    }
 
     if (!$link) {
         $lowerSlug = strtolower($slug);
@@ -155,7 +162,7 @@ try {
     $channelNames = [
         'web_institucional'    => 'Portal Web',
         'link_ads'             => 'Link Ads (' . $finalSubcampaign . ')',
-        'mailing_sms_chattigo' => 'CRM (' . $finalSubcampaign . ')',
+        'mailing_sms_chattigo' => 'Mailing / SMS / Chattigo (' . $finalSubcampaign . ')',
         'asesor_prospector'    => 'Asesor / Prospector',
     ];
     $channelDisplay = $channelNames[$link['channel']] ?? 'Portal Web';

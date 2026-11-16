@@ -4,6 +4,7 @@ import {
   CareerItem,
   CHANNEL_BASE_SLUGS,
   ChannelKey,
+  generateDeterministicShortCode,
   isValidPeriodCode,
   LinkItem,
   PeriodItem,
@@ -82,6 +83,8 @@ const INITIAL_LINKS: LinkItem[] = [
   {
     id: 1,
     slug: 'whatsapp-web?utm=Portal%20Web&campana=PORTALWEB&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    short_code: 'ic-pw2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-pw2710',
     normal_url:
       'https://trace.icontinental.edu.pe/whatsapp-web?utm=Portal%20Web&campana=PORTALWEB&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
     title: 'PORTALWEB_202710 - Diseño de Modas',
@@ -103,6 +106,8 @@ const INITIAL_LINKS: LinkItem[] = [
   {
     id: 2,
     slug: 'CRM?utm=chattigo&campana=NURTURING_CHATTIGO&carrera=Contabilidad&periodo=202710',
+    short_code: 'ic-ch2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-ch2710',
     normal_url:
       'https://trace.icontinental.edu.pe/CRM?utm=chattigo&campana=NURTURING_CHATTIGO&carrera=Contabilidad&periodo=202710',
     title: 'NURTURING_CHATTIGO_202710 - Contabilidad',
@@ -115,7 +120,7 @@ const INITIAL_LINKS: LinkItem[] = [
     destination_url: null,
     whatsapp_phone: '51987654321',
     whatsapp_message:
-      'Hola, vengo de CRM (chattigo), quisiera más información sobre Contabilidad en el Instituto y Escuela Superior Continental. Mi código de atención es NURTURING_CHATTIGO_202710',
+      'Hola, vengo de Mailing / SMS / Chattigo (chattigo), quisiera más información sobre Contabilidad en el Instituto y Escuela Superior Continental. Mi código de atención es NURTURING_CHATTIGO_202710',
     is_master_route: true,
     total_clicks: 420,
     unique_visitors: 378,
@@ -124,6 +129,8 @@ const INITIAL_LINKS: LinkItem[] = [
   {
     id: 3,
     slug: 'link-ads?utm=tiktok-ads&campana=ADMISION_PREGRADO&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    short_code: 'ic-tt2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-tt2710',
     normal_url:
       'https://trace.icontinental.edu.pe/link-ads?utm=tiktok-ads&campana=ADMISION_PREGRADO&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
     title: 'ADMISION_PREGRADO_202710 - Diseño de Modas',
@@ -144,6 +151,8 @@ const INITIAL_LINKS: LinkItem[] = [
   {
     id: 4,
     slug: 'link-ads?utm=google-pmax&campana=ADMISION_PREGRADO&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
+    short_code: 'ic-pm2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-pm2710',
     normal_url:
       'https://trace.icontinental.edu.pe/link-ads?utm=google-pmax&campana=ADMISION_PREGRADO&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
     title: 'ADMISION_PREGRADO_202710 - Desarrollo de Sistemas de Información',
@@ -164,6 +173,8 @@ const INITIAL_LINKS: LinkItem[] = [
   {
     id: 5,
     slug: 'asesor?utm=Gerber&campana=FERIA_COLEGIOS&carrera=Gastronom%C3%ADa&periodo=202710',
+    short_code: 'ic-ge2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-ge2710',
     normal_url:
       'https://trace.icontinental.edu.pe/asesor?utm=Gerber&campana=FERIA_COLEGIOS&carrera=Gastronom%C3%ADa&periodo=202710',
     title: 'FERIA_COLEGIOS_202710 - Gastronomía (Gerber)',
@@ -512,7 +523,15 @@ export class DataEngine {
   }
 
   static getLinks(): LinkItem[] {
-    return loadFromStorage<LinkItem[]>(STORAGE_KEYS.LINKS, INITIAL_LINKS);
+    const raw = loadFromStorage<LinkItem[]>(STORAGE_KEYS.LINKS, INITIAL_LINKS);
+    return raw.map((l) => {
+      const sc = l.short_code || generateDeterministicShortCode(`${l.id}|${l.slug}`);
+      return {
+        ...l,
+        short_code: sc,
+        short_url: `https://trace.icontinental.edu.pe/${sc}`,
+      };
+    });
   }
 
   static getRecords(): SubcampaignRecord[] {
@@ -786,10 +805,13 @@ export class DataEngine {
     const finalSlug = normalUrl.replace('https://trace.icontinental.edu.pe/', '');
     const today = new Date().toISOString().slice(0, 10);
     const isPurgeable = Boolean(payload.is_purgeable);
+    const shortCode = generateDeterministicShortCode(`${finalSlug}|${Date.now()}`);
 
     const newLink: LinkItem = {
       id: Math.max(0, ...links.map((l) => l.id)) + 1,
       slug: finalSlug,
+      short_code: shortCode,
+      short_url: `https://trace.icontinental.edu.pe/${shortCode}`,
       normal_url: normalUrl,
       title: `${cleanCamp}_${payload.period} — ${payload.career}`,
       channel: payload.channel,
