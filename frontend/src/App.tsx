@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   BarChart3,
   Calendar,
@@ -11,12 +12,10 @@ import {
   Edit3,
   FilterX,
   FlaskConical,
-  Globe,
   Link2,
   Lock,
   LogOut,
   Mail,
-  MessageSquare,
   Phone,
   Play,
   Plus,
@@ -25,35 +24,86 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Trash2,
+  UserCheck,
   X,
 } from 'lucide-react';
 import {
-  CAMPAIGN_ORIGINS,
+  AdvisorItem,
+  buildDefaultWhatsAppMessage,
   CHANNEL_LABELS,
   ChannelKey,
+  CRM_ORIGINS,
+  isValidPeriodCode,
+  LINK_ADS_PLATFORMS,
   LinkItem,
+  PeriodItem,
+  sanitizeCampaignInput,
   SubcampaignRecord,
   WhatsAppNumberItem,
 } from './types/trace';
-import { buildNormalTrackingUrl, DataEngine } from './services/dataEngine';
+import { buildSystemTrackingUrl, DataEngine } from './services/dataEngine';
 import { renderQrPngDataUrl, renderQrSvg } from './utils/qrGenerator';
 
 type MainModule = 'reports' | 'generator' | 'tools';
 type DatePreset =
+  | 'custom'
   | 'today'
+  | 'yesterday'
   | 'this_week'
   | 'last_7_days'
+  | 'last_week'
+  | 'last_28_days'
   | 'last_30_days'
+  | 'this_month'
   | 'last_month'
-  | 'custom'
+  | 'last_90_days'
+  | 'this_year'
   | 'all';
 
-const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v1';
+const DATE_PRESET_LABELS: Record<DatePreset, string> = {
+  custom: 'Personalizado',
+  today: 'Hoy',
+  yesterday: 'Ayer',
+  this_week: 'Esta semana',
+  last_7_days: 'Los últimos 7 días',
+  last_week: 'La semana pasada',
+  last_28_days: 'Los últimos 28 días',
+  last_30_days: 'Los últimos 30 días',
+  this_month: 'Este mes',
+  last_month: 'El mes pasado',
+  last_90_days: 'Los últimos 90 días',
+  this_year: 'Este año (de enero a hoy)',
+  all: 'Todo el historial',
+};
+
+const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v2';
+
+function formatShortDateEs(isoDate: string): string {
+  if (!isoDate) return '';
+  const parts = isoDate.split('-');
+  if (parts.length !== 3) return isoDate;
+  const months = [
+    'ene',
+    'feb',
+    'mar',
+    'abr',
+    'may',
+    'jun',
+    'jul',
+    'ago',
+    'sep',
+    'oct',
+    'nov',
+    'dic',
+  ];
+  const y = parts[0];
+  const mIdx = Math.max(0, Math.min(11, parseInt(parts[1], 10) - 1));
+  const d = parseInt(parts[2], 10);
+  return `${d} ${months[mIdx]} ${y}`;
+}
 
 export const App: React.FC = () => {
-  // El proyecto es público excepto en el módulo 02 (Generador de Enlaces)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
       return localStorage.getItem(AUTH_STORAGE_KEY) === '1';
@@ -62,38 +112,55 @@ export const App: React.FC = () => {
     }
   });
   const [loginEmail, setLoginEmail] = useState('admin@icontinental.edu.pe');
-  const [loginPassword, setLoginPassword] = useState('');
+  const [loginPassword, setLoginPassword] = useState('TraceIC2026!');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginLoading, setLoginLoading] = useState<boolean>(false);
 
   const [activeModule, setActiveModule] = useState<MainModule>('reports');
 
-  // Datos sincronizados con MySQL / Local
+  // Estado sincronizado
+  const [periods, setPeriods] = useState<PeriodItem[]>([]);
+  const [activePeriod, setActivePeriod] = useState<string>('202710');
+  const [campaigns, setCampaigns] = useState<string[]>([]);
+  const [advisors, setAdvisors] = useState<AdvisorItem[]>([]);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [records, setRecords] = useState<SubcampaignRecord[]>([]);
   const [waNumbers, setWaNumbers] = useState<WhatsAppNumberItem[]>([]);
 
   // ===========================================================================
-  // ESTADOS DE REPORTERÍA (Fechas con calendario + Filtro de Campaña Origen)
+  // FILTRO DE FECHA CON 1 SOLO BOTÓN Y DROPDOWN (POR DEFECTO: "ESTE MES")
   // ===========================================================================
-  const [datePreset, setDatePreset] = useState<DatePreset>('all');
-  const [startDate, setStartDate] = useState<string>('2025-01-01');
-  const [endDate, setEndDate] = useState<string>('2029-12-31');
-  const [reportCampaignFilter, setReportCampaignFilter] = useState<string>('all');
+  const [datePreset, setDatePreset] = useState<DatePreset>('this_month');
+  const [startDate, setStartDate] = useState<string>('2026-11-01');
+  const [endDate, setEndDate] = useState<string>('2026-11-30');
+  // Estados temporales dentro del dropdown antes de pulsar "Aplicar"
+  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
+  const [tempPreset, setTempPreset] = useState<DatePreset>('this_month');
+  const [tempStart, setTempStart] = useState<string>('2026-11-01');
+  const [tempEnd, setTempEnd] = useState<string>('2026-11-30');
+  const dateDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('all');
   const [selectedChannelFilter, setSelectedChannelFilter] = useState<ChannelKey | 'all'>('all');
-  const [expandedCampaigns, setExpandedCampaigns] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ===========================================================================
-  // ESTADOS DEL MODAL / HERRAMIENTA DE DEPURACIÓN DE CONTEOS Y PRUEBAS
+  // MODAL DE CONFIRMACIÓN DE ELIMINACIÓN ("¿Seguro que quieres eliminar?")
+  // ===========================================================================
+  const [confirmDelete, setConfirmDelete] = useState<{
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
+
+  // ===========================================================================
+  // MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS POR RANGO DE FECHAS
   // ===========================================================================
   const [isPurgeModalOpen, setIsPurgeModalOpen] = useState<boolean>(false);
-  const [purgeStartDate, setPurgeStartDate] = useState<string>(() =>
-    new Date().toISOString().slice(0, 10)
-  );
-  const [purgeEndDate, setPurgeEndDate] = useState<string>(() =>
-    new Date().toISOString().slice(0, 10)
-  );
+  const [purgeStartDate, setPurgeStartDate] = useState<string>('2025-01-01');
+  const [purgeEndDate, setPurgeEndDate] = useState<string>('2029-12-31');
   const [purgeMode, setPurgeMode] = useState<'purgeable_only' | 'specific_target'>(
     'purgeable_only'
   );
@@ -103,74 +170,155 @@ export const App: React.FC = () => {
   const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // ESTADOS DEL GENERADOR DE ENLACES
+  // GENERADOR DE ENLACES (Sin alias cortos manuales — el sistema genera con utm=)
   // ===========================================================================
-  const [genChannel, setGenChannel] = useState<ChannelKey>('mailing_sms_chattigo');
-  const [genCampaign, setGenCampaign] = useState<string>('202710');
-  const [genSubcampaign, setGenSubcampaign] = useState<string>('sms-cierre-inscripciones');
-  const [genDestType, setGenDestType] = useState<'whatsapp' | 'url'>('whatsapp');
+  const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
+  const [genCampaignMode, setGenCampaignMode] = useState<'select' | 'new'>('select');
+  const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('ADMISION_PREGRADO');
+  const [genNewCampaignInput, setGenNewCampaignInput] = useState<string>('');
+  const [genPeriod, setGenPeriod] = useState<string>('202710');
+
+  // Escenarios según canal
+  const [genLinkAdsUtm, setGenLinkAdsUtm] = useState<string>('tiktok-ads');
+  const [genCrmOrigin, setGenCrmOrigin] = useState<string>('chattigo');
+  const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
+  const [genPortalSubsite, setGenPortalSubsite] = useState<string>('');
+
   const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
-  const [genWaMessage, setGenWaMessage] = useState<string>(
-    'Hola Instituto Continental, deseo recibir información sobre sus carreras.'
-  );
-  const [genDestUrl, setGenDestUrl] = useState<string>('https://icontinental.edu.pe/admision/');
-  // Decisión de alias corto DESPUÉS de ver el enlace normal
-  const [useShortAlias, setUseShortAlias] = useState<boolean>(false);
-  const [customSlug, setCustomSlug] = useState<string>('');
-  // Checkbox para permitir si el enlace será depurable (de prueba)
   const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
-  const [genTitle, setGenTitle] = useState<string>('');
   const [genFeedbackUrl, setGenFeedbackUrl] = useState<string | null>(null);
   const [linkSearch, setLinkSearch] = useState<string>('');
 
   // ===========================================================================
-  // ESTADOS DEL MÓDULO 03: WHATSAPP Y HERRAMIENTAS ADICIONALES
+  // CONFIGURACIÓN: PERIODOS, ASESORES, WHATSAPP, QR Y SIMULADOR
   // ===========================================================================
+  const [newPeriodInput, setNewPeriodInput] = useState<string>('');
+  const [periodError, setPeriodError] = useState<string | null>(null);
+
+  const [editingAdvisorId, setEditingAdvisorId] = useState<number | null>(null);
+  const [advisorNameInput, setAdvisorNameInput] = useState<string>('');
+  const [advisorPhoneInput, setAdvisorPhoneInput] = useState<string>('');
+
   const [editingWaId, setEditingWaId] = useState<number | null>(null);
   const [waLabelInput, setWaLabelInput] = useState('');
   const [waPhoneInput, setWaPhoneInput] = useState('');
   const [waDeptInput, setWaDeptInput] = useState('Admisión');
-  const [waGreetingInput, setWaGreetingInput] = useState(
-    'Hola Instituto Continental, deseo recibir información.'
-  );
 
-  // Herramienta QR
   const [qrSelectedUrl, setQrSelectedUrl] = useState<string>(
-    'https://trace.icontinental.edu.pe/whatsapp-web'
+    'https://trace.icontinental.edu.pe/whatsapp-web?utm=portal-web&campana=PORTALWEB&periodo=202710'
   );
   const [qrColor, setQrColor] = useState<'#111827' | '#E4000B'>('#111827');
   const [qrPngUrl, setQrPngUrl] = useState<string>('');
   const [qrSvgText, setQrSvgText] = useState<string>('');
 
-  // Herramienta Simulador / Probador de Clics
-  const [simRecordId, setSimRecordId] = useState<string>('web-1');
+  const [simRecordId, setSimRecordId] = useState<string>('');
   const [simIsBot, setSimIsBot] = useState<boolean>(false);
   const [simFeedback, setSimFeedback] = useState<string | null>(null);
 
   const isTestRecord = (r: SubcampaignRecord) =>
     Boolean(r.is_purgeable) || /prueba|test|demo|simulaci/i.test(r.subcampaign);
 
+  const computeDatesForPreset = (preset: DatePreset): { start: string; end: string } => {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const todayStr = fmt(now);
+
+    if (preset === 'today') {
+      return { start: todayStr, end: todayStr };
+    }
+    if (preset === 'yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      return { start: fmt(y), end: fmt(y) };
+    }
+    if (preset === 'this_week') {
+      const s = new Date(now);
+      const day = s.getDay() || 7;
+      s.setDate(s.getDate() - (day - 1));
+      return { start: fmt(s), end: todayStr };
+    }
+    if (preset === 'last_7_days') {
+      const s = new Date(now);
+      s.setDate(s.getDate() - 6);
+      return { start: fmt(s), end: todayStr };
+    }
+    if (preset === 'last_week') {
+      const endW = new Date(now);
+      const day = endW.getDay() || 7;
+      endW.setDate(endW.getDate() - day);
+      const startW = new Date(endW);
+      startW.setDate(startW.getDate() - 6);
+      return { start: fmt(startW), end: fmt(endW) };
+    }
+    if (preset === 'last_28_days') {
+      const s = new Date(now);
+      s.setDate(s.getDate() - 27);
+      return { start: fmt(s), end: todayStr };
+    }
+    if (preset === 'last_30_days') {
+      const s = new Date(now);
+      s.setDate(s.getDate() - 29);
+      return { start: fmt(s), end: todayStr };
+    }
+    if (preset === 'this_month') {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { start: fmt(first), end: fmt(last) };
+    }
+    if (preset === 'last_month') {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { start: fmt(first), end: fmt(last) };
+    }
+    if (preset === 'last_90_days') {
+      const s = new Date(now);
+      s.setDate(s.getDate() - 89);
+      return { start: fmt(s), end: todayStr };
+    }
+    if (preset === 'this_year') {
+      const first = new Date(now.getFullYear(), 0, 1);
+      return { start: fmt(first), end: todayStr };
+    }
+    if (preset === 'all') {
+      return { start: '2025-01-01', end: '2029-12-31' };
+    }
+    return { start: tempStart, end: tempEnd };
+  };
+
   const refreshLocalState = () => {
+    const loadedPeriods = DataEngine.getPeriods();
+    const currentActivePeriod = DataEngine.getActivePeriod();
+    const loadedCampaigns = DataEngine.getCampaigns();
+    const loadedAdvisors = DataEngine.getAdvisors();
     const loadedLinks = DataEngine.getLinks();
     const loadedRecords = DataEngine.getRecords();
     const loadedWa = DataEngine.getWhatsAppNumbers();
+
+    setPeriods(loadedPeriods);
+    setActivePeriod(currentActivePeriod);
+    setGenPeriod(currentActivePeriod);
+    setCampaigns(loadedCampaigns);
+    setAdvisors(loadedAdvisors);
     setLinks(loadedLinks);
     setRecords(loadedRecords);
     setWaNumbers(loadedWa);
 
+    if (loadedAdvisors.length > 0 && !loadedAdvisors.some((a) => a.name === genAdvisorName)) {
+      setGenAdvisorName(loadedAdvisors[0].name);
+    }
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
       setSimRecordId(loadedRecords[0].id);
     }
-    if (loadedRecords.length > 0 && !purgeTargetId) {
+    if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === purgeTargetId)) {
       const firstTest = loadedRecords.find((r) => isTestRecord(r));
       setPurgeTargetId(firstTest ? firstTest.id : loadedRecords[0].id);
     }
 
     const exp: Record<string, boolean> = {};
     loadedRecords.forEach((r) => {
-      exp[`${r.channel}::${r.campaign}`] = true;
+      exp[`${r.channel}::${r.period}`] = true;
     });
-    setExpandedCampaigns((prev) => ({ ...exp, ...prev }));
+    setExpandedGroups((prev) => ({ ...exp, ...prev }));
   };
 
   const loadData = () => {
@@ -179,10 +327,29 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    const initRange = computeDatesForPreset('this_month');
+    setStartDate(initRange.start);
+    setEndDate(initRange.end);
+    setTempStart(initRange.start);
+    setTempEnd(initRange.end);
+
     DataEngine.setOnSync(() => {
       refreshLocalState();
     });
     loadData();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (
+        dateDropdownRef.current &&
+        !dateDropdownRef.current.contains(ev.target as Node)
+      ) {
+        setIsDateDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -221,116 +388,78 @@ export const App: React.FC = () => {
     }
   };
 
-  const applyDatePreset = (preset: DatePreset) => {
-    setDatePreset(preset);
-    const now = new Date();
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    const todayStr = fmt(now);
-
-    if (preset === 'today') {
-      setStartDate(todayStr);
-      setEndDate(todayStr);
-    } else if (preset === 'this_week') {
-      const start = new Date(now);
-      const day = start.getDay() || 7;
-      start.setDate(start.getDate() - (day - 1));
-      setStartDate(fmt(start));
-      setEndDate(todayStr);
-    } else if (preset === 'last_7_days') {
-      const start = new Date(now);
-      start.setDate(start.getDate() - 7);
-      setStartDate(fmt(start));
-      setEndDate(todayStr);
-    } else if (preset === 'last_30_days') {
-      const start = new Date(now);
-      start.setDate(start.getDate() - 30);
-      setStartDate(fmt(start));
-      setEndDate(todayStr);
-    } else if (preset === 'last_month') {
-      const firstPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastPrev = new Date(now.getFullYear(), now.getMonth(), 0);
-      setStartDate(fmt(firstPrev));
-      setEndDate(fmt(lastPrev));
-    } else if (preset === 'all') {
-      setStartDate('2025-01-01');
-      setEndDate('2029-12-31');
-    }
-  };
-
-  const applyPurgeDatePreset = (preset: 'today' | 'last_7_days' | 'all') => {
-    const now = new Date();
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    const todayStr = fmt(now);
-    if (preset === 'today') {
-      setPurgeStartDate(todayStr);
-      setPurgeEndDate(todayStr);
-    } else if (preset === 'last_7_days') {
-      const start = new Date(now);
-      start.setDate(start.getDate() - 7);
-      setPurgeStartDate(fmt(start));
-      setPurgeEndDate(todayStr);
-    } else {
-      setPurgeStartDate('2025-01-01');
-      setPurgeEndDate('2029-12-31');
-    }
-  };
-
-  const openQuickPurgeForRecord = (rec: SubcampaignRecord) => {
-    setPurgeMode('specific_target');
-    setPurgeTargetId(rec.id);
-    setPurgeStartDate('2025-01-01');
-    setPurgeEndDate('2029-12-31');
-    setPurgeRemoveEmpty(true);
-    setPurgeFeedback(null);
-    setIsPurgeModalOpen(true);
-  };
-
-  const handleExecutePurge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPurgeLoading(true);
-    setPurgeFeedback(null);
-    const result = await DataEngine.purgeCounts({
-      startDate: purgeStartDate,
-      endDate: purgeEndDate,
-      mode: purgeMode,
-      targetId: purgeMode === 'specific_target' ? purgeTargetId : undefined,
-      removeEmptyLinks: purgeRemoveEmpty,
-    });
-    setPurgeLoading(false);
-    setPurgeFeedback(result.message);
-    loadData();
-  };
-
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 1800);
   };
 
-  // Vista previa en tiempo real del Enlace Normal (antes de decidir si se usa alias corto)
-  const previewNormalUrl = useMemo(() => {
-    return buildNormalTrackingUrl({
+  // ===========================================================================
+  // CÁLCULO AUTOMÁTICO DE CAMPAÑA, UTM, TELÉFONO, MENSAJE Y ENLACE EN GENERADOR
+  // ===========================================================================
+  const effectiveCampaign = useMemo(() => {
+    const raw =
+      genCampaignMode === 'new' ? genNewCampaignInput : genSelectedCampaign;
+    return sanitizeCampaignInput(raw) || 'PORTALWEB';
+  }, [genCampaignMode, genNewCampaignInput, genSelectedCampaign]);
+
+  const effectiveUtm = useMemo(() => {
+    if (genChannel === 'link_ads') return genLinkAdsUtm;
+    if (genChannel === 'mailing_sms_chattigo') return genCrmOrigin;
+    if (genChannel === 'asesor_prospector') return genAdvisorName || 'Gerber';
+    if (genPortalSubsite.trim()) {
+      const clean = genPortalSubsite
+        .trim()
+        .replace(/^https?:\/\/(www\.)?icontinental\.edu\.pe\/?/i, '')
+        .replace(/\/$/, '');
+      return clean || 'portal-web';
+    }
+    return 'portal-web';
+  }, [genChannel, genLinkAdsUtm, genCrmOrigin, genAdvisorName, genPortalSubsite]);
+
+  const effectivePhone = useMemo(() => {
+    if (genChannel === 'asesor_prospector') {
+      const adv = advisors.find((a) => a.name === genAdvisorName);
+      return adv ? adv.phone_number : genWaPhone;
+    }
+    return genWaPhone;
+  }, [genChannel, genAdvisorName, advisors, genWaPhone]);
+
+  const effectiveWaMessage = useMemo(() => {
+    return buildDefaultWhatsAppMessage({
       channel: genChannel,
-      campaign: genCampaign,
-      subcampaign: genSubcampaign,
+      campaign: effectiveCampaign,
+      period: genPeriod || activePeriod,
+      utmSource: effectiveUtm,
+      advisorName: genAdvisorName,
+      detectedUrl:
+        genChannel === 'web_institucional' && genPortalSubsite.trim()
+          ? genPortalSubsite.trim()
+          : undefined,
     });
-  }, [genChannel, genCampaign, genSubcampaign]);
+  }, [genChannel, effectiveCampaign, genPeriod, activePeriod, effectiveUtm, genAdvisorName, genPortalSubsite]);
 
-  const previewShortAliasUrl = useMemo(() => {
-    const clean = customSlug.trim().replace(/[^a-zA-Z0-9\-_]/g, '-') || 'mi-alias';
-    return `https://trace.icontinental.edu.pe/${clean}`;
-  }, [customSlug]);
+  const generatedSystemUrl = useMemo(() => {
+    return buildSystemTrackingUrl({
+      channel: genChannel,
+      campaign: effectiveCampaign,
+      period: genPeriod || activePeriod,
+      utmSource: effectiveUtm,
+    });
+  }, [genChannel, effectiveCampaign, genPeriod, activePeriod, effectiveUtm]);
 
-  // Filtrar registros según el rango de fechas del calendario y la Campaña (Origen)
+  // ===========================================================================
+  // FILTRADO DE REPORTERÍA (Por Fecha y por Periodo)
+  // ===========================================================================
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
       const matchDate =
         r.last_activity_date >= startDate && r.last_activity_date <= endDate;
-      const matchCampaign =
-        reportCampaignFilter === 'all' || r.campaign === reportCampaignFilter;
-      return matchDate && matchCampaign;
+      const matchPeriod =
+        reportPeriodFilter === 'all' || r.period === reportPeriodFilter;
+      return matchDate && matchPeriod;
     });
-  }, [records, startDate, endDate, reportCampaignFilter]);
+  }, [records, startDate, endDate, reportPeriodFilter]);
 
   const purgeableRecordsCount = useMemo(() => {
     return records.filter((r) => isTestRecord(r)).length;
@@ -339,9 +468,9 @@ export const App: React.FC = () => {
   const channelTotals = useMemo(() => {
     const map: Record<ChannelKey, { clicks: number; unique: number }> = {
       web_institucional: { clicks: 0, unique: 0 },
-      tiktok_ads: { clicks: 0, unique: 0 },
+      link_ads: { clicks: 0, unique: 0 },
       mailing_sms_chattigo: { clicks: 0, unique: 0 },
-      landing_page: { clicks: 0, unique: 0 },
+      asesor_prospector: { clicks: 0, unique: 0 },
     };
     filteredRecords.forEach((r) => {
       if (map[r.channel]) {
@@ -354,22 +483,60 @@ export const App: React.FC = () => {
     return { byChannel: map, grandTotalClicks, grandTotalUnique };
   }, [filteredRecords]);
 
+  // NUEVO BLOQUE EN MÓDULO 01: "Resultados por Campaña"
+  const resultsByCampaign = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        campaign: string;
+        period: string;
+        attentionCode: string;
+        clicks: number;
+        unique: number;
+        channels: Set<string>;
+      }
+    >();
+
+    filteredRecords.forEach((r) => {
+      const code = `${r.campaign}_${r.period}`;
+      const current = map.get(code) || {
+        campaign: r.campaign,
+        period: r.period,
+        attentionCode: code,
+        clicks: 0,
+        unique: 0,
+        channels: new Set<string>(),
+      };
+      current.clicks += r.clicks;
+      current.unique += r.unique_visitors;
+      current.channels.add(CHANNEL_LABELS[r.channel]);
+      map.set(code, current);
+    });
+
+    return Array.from(map.values())
+      .map((item) => ({
+        ...item,
+        channelsList: Array.from(item.channels),
+      }))
+      .sort((a, b) => b.clicks - a.clicks);
+  }, [filteredRecords]);
+
   const hierarchicalReport = useMemo(() => {
     const channelsOrder: ChannelKey[] = [
       'web_institucional',
-      'tiktok_ads',
+      'link_ads',
       'mailing_sms_chattigo',
-      'landing_page',
+      'asesor_prospector',
     ];
 
     return channelsOrder
       .filter((ch) => selectedChannelFilter === 'all' || ch === selectedChannelFilter)
       .map((ch) => {
         const chRecords = filteredRecords.filter((r) => r.channel === ch);
-        const campaignsMap = new Map<
+        const periodsMap = new Map<
           string,
           {
-            campaign: string;
+            period: string;
             clicks: number;
             unique: number;
             subcampaigns: SubcampaignRecord[];
@@ -377,8 +544,8 @@ export const App: React.FC = () => {
         >();
 
         chRecords.forEach((rec) => {
-          const current = campaignsMap.get(rec.campaign) || {
-            campaign: rec.campaign,
+          const current = periodsMap.get(rec.period) || {
+            period: rec.period,
             clicks: 0,
             unique: 0,
             subcampaigns: [],
@@ -386,23 +553,23 @@ export const App: React.FC = () => {
           current.clicks += rec.clicks;
           current.unique += rec.unique_visitors;
           current.subcampaigns.push(rec);
-          campaignsMap.set(rec.campaign, current);
+          periodsMap.set(rec.period, current);
         });
 
-        const campaignsList = Array.from(campaignsMap.values()).map((c) => ({
-          ...c,
-          subcampaigns: c.subcampaigns.sort((a, b) => b.clicks - a.clicks),
+        const periodsList = Array.from(periodsMap.values()).map((p) => ({
+          ...p,
+          subcampaigns: p.subcampaigns.sort((a, b) => b.clicks - a.clicks),
         }));
 
-        const totalClicks = campaignsList.reduce((s, c) => s + c.clicks, 0);
-        const totalUnique = campaignsList.reduce((s, c) => s + c.unique, 0);
+        const totalClicks = periodsList.reduce((s, p) => s + p.clicks, 0);
+        const totalUnique = periodsList.reduce((s, p) => s + p.unique, 0);
 
         return {
           channel: ch,
           channelLabel: CHANNEL_LABELS[ch],
           totalClicks,
           totalUnique,
-          campaigns: campaignsList.sort((a, b) => b.clicks - a.clicks),
+          periods: periodsList.sort((a, b) => b.clicks - a.clicks),
         };
       });
   }, [filteredRecords, selectedChannelFilter]);
@@ -420,22 +587,24 @@ export const App: React.FC = () => {
   const handleExportReportCsv = () => {
     const headers = [
       'Canal',
-      'Campana_Origen',
-      'Subcampana_o_Conjunto_o_Carrera',
-      'Enlace_o_URL_Origen',
+      'Periodo',
+      'Campana',
+      'Codigo_Atencion',
+      'UTM_o_Asesor_o_Carrera',
+      'Enlace',
       'Clics_Totales',
       'Personas_Unicas',
-      'Es_Depurable_Prueba',
       'Fecha_Actividad',
     ];
     const rows = filteredRecords.map((r) => [
       `"${CHANNEL_LABELS[r.channel]}"`,
+      `"${r.period}"`,
       `"${r.campaign}"`,
+      `"${r.campaign}_${r.period}"`,
       `"${r.subcampaign.replace(/"/g, '""')}"`,
       `"${r.url_reference || `https://${r.short_link}`}"`,
       r.clicks,
       r.unique_visitors,
-      isTestRecord(r) ? 'SI' : 'NO',
       r.last_activity_date,
     ]);
     const csv = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -448,201 +617,138 @@ export const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleCreateLink = (e: React.FormEvent) => {
+  const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setGenFeedbackUrl(null);
-
-    const autoTitle =
-      genTitle.trim() ||
-      `${CHANNEL_LABELS[genChannel]} — ${genCampaign} (${genSubcampaign || 'General'})`;
-
     try {
-      const created = DataEngine.createLink({
-        title: autoTitle,
-        useShortAlias,
-        customSlug: useShortAlias ? customSlug.trim() : undefined,
+      const created = await DataEngine.createLink({
         channel: genChannel,
-        campaign: genCampaign,
-        subcampaign: genSubcampaign.trim() || 'General',
-        destination_type: genDestType,
-        destination_url: genDestType === 'url' ? genDestUrl.trim() : undefined,
-        whatsapp_phone: genDestType === 'whatsapp' ? genWaPhone : undefined,
-        whatsapp_message: genDestType === 'whatsapp' ? genWaMessage.trim() : undefined,
+        period: genPeriod || activePeriod,
+        campaign: effectiveCampaign,
+        subcampaign: effectiveUtm,
+        advisor_name: genChannel === 'asesor_prospector' ? genAdvisorName : undefined,
+        destination_type: 'whatsapp',
+        whatsapp_phone: effectivePhone,
+        whatsapp_message: effectiveWaMessage,
         is_purgeable: genIsPurgeable,
       });
-
-      const finalUrl = `https://trace.icontinental.edu.pe/${created.slug}`;
-      setGenFeedbackUrl(finalUrl);
-      setGenTitle('');
-      setCustomSlug('');
-      loadData();
+      setGenFeedbackUrl(created.normal_url);
+      if (genCampaignMode === 'new') {
+        setGenSelectedCampaign(effectiveCampaign);
+        setGenCampaignMode('select');
+        setGenNewCampaignInput('');
+      }
+      refreshLocalState();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al guardar el enlace');
+      alert(err instanceof Error ? err.message : 'Error al registrar el enlace');
     }
   };
 
-  const handleSaveWhatsAppNumber = (e: React.FormEvent) => {
+  const handleExecutePurge = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!waLabelInput.trim() || !waPhoneInput.trim()) return;
-    DataEngine.saveWhatsAppNumber({
-      id: editingWaId || undefined,
-      label: waLabelInput,
-      phone_number: waPhoneInput,
-      department: waDeptInput,
-      default_greeting: waGreetingInput,
+    setPurgeLoading(true);
+    setPurgeFeedback(null);
+    const res = await DataEngine.purgeCounts({
+      startDate: purgeStartDate,
+      endDate: purgeEndDate,
+      mode: purgeMode,
+      targetId: purgeMode === 'specific_target' ? purgeTargetId : undefined,
+      removeEmptyLinks: purgeRemoveEmpty,
     });
-    setEditingWaId(null);
-    setWaLabelInput('');
-    setWaPhoneInput('');
-    setWaDeptInput('Admisión');
-    loadData();
+    setPurgeLoading(false);
+    setPurgeFeedback(res.message);
+    refreshLocalState();
   };
 
   // ===========================================================================
-  // PANTALLA DE LOGIN SPLIT-SCREEN (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
-  // Se solicita ÚNICAMENTE cuando se intenta acceder a "02. Generador de Enlaces"
+  // LOGIN SPLIT-SCREEN MINIMALISTA (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
   // ===========================================================================
   if (activeModule === 'generator' && !isAuthenticated) {
     return (
       <div className="min-h-screen w-full flex bg-white text-ic-dark">
-        {/* MITAD IZQUIERDA (50%): Imagen Editorial + Identidad Instituto Continental */}
-        <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B0F17] text-white overflow-hidden flex-col justify-between p-14">
-          {/* Fotografía de fondo con tratamiento editorial oscuro y acento Rojo Continental */}
+        {/* MITAD IZQUIERDA (50%): Imagen Limpia a Pantalla Completa */}
+        <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B0F17] overflow-hidden flex-col justify-between p-12">
           <img
             src="https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&w=1600&q=85"
-            alt="Campus Instituto Continental"
-            className="absolute inset-0 w-full h-full object-cover opacity-35 scale-105"
+            alt="Instituto Continental"
+            className="absolute inset-0 w-full h-full object-cover opacity-55"
           />
-          <div className="absolute inset-0 bg-gradient-to-tr from-[#0B0F17] via-[#0B0F17]/80 to-[#E4000B]/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17]/90 via-transparent to-[#0B0F17]/50" />
           <div className="absolute top-0 left-0 w-2 h-full bg-ic-red" />
 
-          {/* Cabecera Izquierda */}
-          <div className="relative z-10 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-7 bg-ic-red" />
-              <div>
-                <div className="font-serif font-bold text-xl tracking-tight text-white">
-                  TRACE IC
-                </div>
-                <div className="text-[10px] font-mono uppercase tracking-widest text-gray-300">
-                  Instituto Continental
-                </div>
-              </div>
-            </div>
-            <span className="px-3 py-1 text-[11px] font-mono bg-white/10 backdrop-blur-sm border border-white/15 text-white">
-              trace.icontinental.edu.pe
+          <div className="relative z-10 flex items-center gap-3">
+            <div className="w-2 h-7 bg-ic-red" />
+            <span className="font-serif font-bold text-xl tracking-tight text-white">
+              TRACE IC
             </span>
           </div>
 
-          {/* Mensaje Central Editorial */}
-          <div className="relative z-10 max-w-lg space-y-6 my-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-ic-red text-white text-[11px] font-semibold uppercase tracking-widest">
-              <Sparkles className="w-3.5 h-3.5" />
-              Plataforma de Atribución Digital
+          <div className="relative z-10">
+            <div className="text-xs font-mono uppercase tracking-widest text-white/80">
+              Instituto Continental
             </div>
-
-            <h2 className="text-4xl xl:text-5xl font-serif font-bold leading-tight text-white">
-              Trazabilidad precisa para cada campaña y carrera.
-            </h2>
-
-            <p className="text-sm text-gray-300 leading-relaxed">
-              Gestiona enlaces inteligentes para Mailing, SMS, Chattigo (<code className="text-white font-mono">/CRM</code>),
-              TikTok Ads y el Sitio Web Institucional con autodetección de carreras y filtrado automático de bots.
-            </p>
-
-            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/15">
-              <div>
-                <div className="text-xs font-mono text-ic-red font-bold">CANAL /CRM</div>
-                <div className="text-xs text-gray-300 mt-0.5">Mailing, SMS y Chattigo</div>
-              </div>
-              <div>
-                <div className="text-xs font-mono text-ic-red font-bold">/CARRERA/...</div>
-                <div className="text-xs text-gray-300 mt-0.5">Autodetección Web</div>
-              </div>
-              <div>
-                <div className="text-xs font-mono text-ic-red font-bold">202710–202930</div>
-                <div className="text-xs text-gray-300 mt-0.5">Control por Campaña</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Pie Izquierdo */}
-          <div className="relative z-10 flex items-center justify-between text-xs text-gray-400 border-t border-white/10 pt-6">
-            <span>© Instituto Continental • Ecosistema de Marketing</span>
-            <span className="font-mono text-[11px] text-gray-300">Módulo 02 Protegido</span>
           </div>
         </div>
 
-        {/* MITAD DERECHA (50%): Formulario de Login Centrado */}
-        <div className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 xl:p-16 bg-white">
-          {/* Barra superior para regresar a los módulos públicos */}
-          <div className="flex items-center justify-between">
+        {/* MITAD DERECHA (50%): Login Centrado y Minimalista */}
+        <div className="w-full lg:w-1/2 flex flex-col justify-between p-8 sm:p-14 bg-white">
+          <div>
             <button
               type="button"
               onClick={() => setActiveModule('reports')}
-              className="inline-flex items-center gap-2 text-xs font-semibold text-ic-muted hover:text-ic-dark transition-colors"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-ic-muted hover:text-ic-dark"
             >
               <ArrowLeft className="w-4 h-4 text-ic-red" />
-              Volver a Reportería Pública
+              Volver a Reportería
             </button>
-
-            <span className="text-[11px] font-mono text-ic-muted">
-              Reportería abierta • Generador con acceso
-            </span>
           </div>
 
-          {/* Contenedor Centrado en la Mitad Derecha */}
-          <div className="w-full max-w-md mx-auto my-auto py-8 space-y-8">
-            <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-ic-redSoft text-ic-red text-[11px] font-semibold uppercase tracking-wider">
-                <Lock className="w-3.5 h-3.5" />
-                Módulo 02 • Generador de Enlaces
-              </div>
-              <h1 className="text-3xl sm:text-4xl font-serif font-bold text-ic-dark tracking-tight">
+          <div className="w-full max-w-sm mx-auto my-auto space-y-6">
+            <div className="space-y-1">
+              <div className="w-8 h-1 bg-ic-red mb-3" />
+              <h1 className="text-3xl font-serif font-bold text-ic-dark">
                 Iniciar Sesión
               </h1>
-              <p className="text-xs text-ic-muted leading-relaxed">
-                La reportería general es de acceso público para el equipo. Ingresa tus credenciales de administrador para crear, configurar o eliminar enlaces de campaña.
+              <p className="text-xs text-ic-muted">
+                Generador de Enlaces • Trace IC
               </p>
             </div>
 
             {loginError && (
-              <div className="p-3.5 bg-red-50 border-l-2 border-l-ic-red border border-red-200 text-xs text-red-900 font-medium">
+              <div className="p-3 bg-red-50 border-l-2 border-l-ic-red text-xs text-red-900">
                 {loginError}
               </div>
             )}
 
-            <form onSubmit={handleLoginSubmit} className="space-y-5">
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-2">
-                  Correo Institucional
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
+                  Usuario
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-ic-muted absolute left-3.5 top-3" />
+                  <Mail className="w-4 h-4 text-ic-muted absolute left-3.5 top-2.5" />
                   <input
                     type="email"
                     required
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="admin@icontinental.edu.pe"
-                    className="w-full pl-10 pr-4 py-2.5 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark transition-colors"
+                    className="w-full pl-10 pr-3 py-2 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-2">
-                  Contraseña de Administrador
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
+                  Contraseña
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-ic-muted absolute left-3.5 top-3" />
+                  <Lock className="w-4 h-4 text-ic-muted absolute left-3.5 top-2.5" />
                   <input
                     type="password"
                     required
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full pl-10 pr-4 py-2.5 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark transition-colors"
+                    className="w-full pl-10 pr-3 py-2 text-xs border border-ic-border bg-[#FAFAFA] focus:bg-white focus:outline-none focus:border-ic-dark"
                   />
                 </div>
               </div>
@@ -650,27 +756,15 @@ export const App: React.FC = () => {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full py-3.5 bg-ic-red hover:bg-ic-redHover disabled:opacity-60 text-white text-xs font-semibold uppercase tracking-wider transition-colors shadow-sm"
+                className="w-full py-3 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider transition-colors"
               >
-                {loginLoading ? 'Verificando acceso...' : 'Acceder al Generador de Enlaces'}
+                {loginLoading ? 'Ingresando...' : 'Ingresar'}
               </button>
             </form>
-
-            <div className="pt-6 border-t border-ic-border flex items-center justify-between text-xs text-ic-muted">
-              <span>¿Solo deseas consultar métricas?</span>
-              <button
-                type="button"
-                onClick={() => setActiveModule('reports')}
-                className="text-ic-red font-semibold hover:underline"
-              >
-                Ir a 01. Reportería →
-              </button>
-            </div>
           </div>
 
-          {/* Pie Derecho */}
-          <div className="text-center lg:text-left text-[11px] text-ic-muted">
-            Trace IC • Acceso exclusivo para creación de enlaces de campañas
+          <div className="text-[11px] text-ic-muted font-mono">
+            trace.icontinental.edu.pe
           </div>
         </div>
       </div>
@@ -680,103 +774,90 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-ic-dark flex flex-col">
       {/* =====================================================================
-          CABECERA SUPERIOR CON ICONOS SVG Y 3 MÓDULOS
+          CABECERA SUPERIOR (Sin Generador en el menú central; botón a la derecha)
          ===================================================================== */}
       <header className="bg-white border-b border-ic-border sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Marca Institucional */}
-          <div className="flex items-center gap-3.5">
-            <div className="w-1.5 h-7 bg-ic-red" />
-            <div className="flex items-center gap-2.5">
+          {/* Izquierda: Marca + Navegación Pública */}
+          <div className="flex items-center gap-8 h-full">
+            <div className="flex items-center gap-3">
+              <div className="w-1.5 h-7 bg-ic-red" />
               <span className="font-serif font-bold text-lg tracking-tight text-ic-dark">
                 TRACE IC
               </span>
-              <span className="hidden sm:inline-block text-[11px] font-mono text-ic-muted px-2 py-0.5 bg-gray-100">
-                trace.icontinental.edu.pe
-              </span>
             </div>
+
+            <nav className="flex items-center h-full space-x-6">
+              <button
+                onClick={() => setActiveModule('reports')}
+                className={`h-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${
+                  activeModule === 'reports'
+                    ? 'border-ic-red text-ic-dark'
+                    : 'border-transparent text-ic-muted hover:text-ic-dark'
+                }`}
+              >
+                <BarChart3
+                  className={`w-4 h-4 ${
+                    activeModule === 'reports' ? 'text-ic-red' : 'text-ic-muted'
+                  }`}
+                />
+                <span>Reportería</span>
+              </button>
+
+              <button
+                onClick={() => setActiveModule('tools')}
+                className={`h-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${
+                  activeModule === 'tools'
+                    ? 'border-ic-red text-ic-dark'
+                    : 'border-transparent text-ic-muted hover:text-ic-dark'
+                }`}
+              >
+                <SlidersHorizontal
+                  className={`w-4 h-4 ${
+                    activeModule === 'tools' ? 'text-ic-red' : 'text-ic-muted'
+                  }`}
+                />
+                <span>Configuración</span>
+              </button>
+            </nav>
           </div>
 
-          {/* Navegación Central con Iconos SVG */}
-          <nav className="flex items-center h-full space-x-6 md:space-x-8">
+          {/* Derecha: Periodo Global Activo + Botón Generador de Enlaces */}
+          <div className="flex items-center gap-2.5">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-[#FAFAFA] border border-ic-border text-xs">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                Periodo Activo:
+              </span>
+              <span className="font-mono font-bold text-ic-red">{activePeriod}</span>
+            </div>
+
             <button
-              onClick={() => setActiveModule('reports')}
-              className={`h-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${
-                activeModule === 'reports'
-                  ? 'border-ic-red text-ic-dark'
-                  : 'border-transparent text-ic-muted hover:text-ic-dark'
-              }`}
+              onClick={loadData}
+              className="p-2 text-ic-muted hover:text-ic-dark border border-ic-border bg-white"
+              title="Actualizar datos"
             >
-              <BarChart3
-                className={`w-4 h-4 ${
-                  activeModule === 'reports' ? 'text-ic-red' : 'text-ic-muted'
-                }`}
-              />
-              <span>01. Reportería</span>
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
 
             <button
               onClick={() => setActiveModule('generator')}
-              className={`h-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${
+              className={`px-3.5 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2 transition-colors ${
                 activeModule === 'generator'
-                  ? 'border-ic-red text-ic-dark'
-                  : 'border-transparent text-ic-muted hover:text-ic-dark'
+                  ? 'bg-ic-red text-white'
+                  : 'bg-ic-dark hover:bg-black text-white'
               }`}
             >
-              <Link2
-                className={`w-4 h-4 ${
-                  activeModule === 'generator' ? 'text-ic-red' : 'text-ic-muted'
-                }`}
-              />
-              <span>02. Generador de Enlaces</span>
-              {!isAuthenticated && (
-                <Lock className="w-3 h-3 text-ic-muted ml-0.5" title="Requiere iniciar sesión" />
-              )}
+              <Link2 className="w-3.5 h-3.5" />
+              <span>Generador de Enlaces</span>
             </button>
 
-            <button
-              onClick={() => setActiveModule('tools')}
-              className={`h-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${
-                activeModule === 'tools'
-                  ? 'border-ic-red text-ic-dark'
-                  : 'border-transparent text-ic-muted hover:text-ic-dark'
-              }`}
-            >
-              <SlidersHorizontal
-                className={`w-4 h-4 ${
-                  activeModule === 'tools' ? 'text-ic-red' : 'text-ic-muted'
-                }`}
-              />
-              <span>03. WhatsApp y Herramientas</span>
-            </button>
-          </nav>
-
-          {/* Acciones de Sincronización y Sesión */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={loadData}
-              className="p-2 text-ic-muted hover:text-ic-dark border border-ic-border bg-white"
-              title="Actualizar datos desde MySQL"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-            {isAuthenticated ? (
+            {isAuthenticated && (
               <button
                 onClick={handleLogout}
-                className="px-2.5 py-1.5 text-xs text-ic-muted hover:text-ic-red border border-ic-border bg-white flex items-center gap-1.5"
-                title="Cerrar sesión de administrador"
+                className="p-2 text-ic-muted hover:text-ic-red border border-ic-border bg-white"
+                title="Cerrar sesión"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Salir</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setActiveModule('generator')}
-                className="px-2.5 py-1.5 text-xs text-ic-dark hover:text-ic-red border border-ic-border bg-white flex items-center gap-1.5"
-                title="Iniciar sesión para el Generador de Enlaces"
-              >
-                <Lock className="w-3.5 h-3.5 text-ic-red" />
-                <span className="hidden md:inline">Acceso Generador</span>
               </button>
             )}
           </div>
@@ -784,7 +865,60 @@ export const App: React.FC = () => {
       </header>
 
       {/* =====================================================================
-          MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS (POR RANGO DE FECHAS)
+          MODAL DE CONFIRMACIÓN DE ELIMINACIÓN ("¿Seguro que quieres eliminar?")
+         ===================================================================== */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="bg-white border border-ic-border w-full max-w-md shadow-xl p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-ic-redSoft text-ic-red">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-serif font-bold text-ic-dark">
+                  {confirmDelete.title}
+                </h3>
+                <p className="text-xs text-ic-muted mt-1">
+                  {confirmDelete.description}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-ic-border">
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={() => setConfirmDelete(null)}
+                className="px-4 py-2 border border-ic-border bg-white text-xs font-medium text-ic-dark hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={async () => {
+                  setDeleteLoading(true);
+                  try {
+                    await confirmDelete.onConfirm();
+                    setConfirmDelete(null);
+                  } catch (err: unknown) {
+                    alert(err instanceof Error ? err.message : 'No se pudo eliminar');
+                    setConfirmDelete(null);
+                  } finally {
+                    setDeleteLoading(false);
+                  }
+                }}
+                className="px-4 py-2 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider"
+              >
+                {deleteLoading ? 'Eliminando...' : 'Sí, eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL DE DEPURACIÓN DE CONTEOS Y PRUEBAS POR RANGO DE FECHAS
          ===================================================================== */}
       {isPurgeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
@@ -792,14 +926,9 @@ export const App: React.FC = () => {
             <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between bg-[#FAFAFA]">
               <div className="flex items-center gap-2.5">
                 <div className="w-1.5 h-5 bg-ic-red" />
-                <div>
-                  <h3 className="text-base font-serif font-bold text-ic-dark">
-                    Depurar Conteos de Prueba por Fecha
-                  </h3>
-                  <p className="text-[11px] text-ic-muted">
-                    Limpia clics de prueba (como <code className="font-mono">prueba-cpanel</code>) o enlaces marcados como depurables.
-                  </p>
-                </div>
+                <h3 className="text-base font-serif font-bold text-ic-dark">
+                  Depurar Conteos de Prueba
+                </h3>
               </div>
               <button
                 type="button"
@@ -811,71 +940,38 @@ export const App: React.FC = () => {
             </div>
 
             <form onSubmit={handleExecutePurge} className="p-6 space-y-5">
-              {/* 1. RANGO DE FECHAS A DEPURAR */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                    1. Rango de Fechas a Limpiar
-                  </label>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => applyPurgeDatePreset('today')}
-                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
-                    >
-                      Hoy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyPurgeDatePreset('last_7_days')}
-                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
-                    >
-                      Últimos 7 días
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyPurgeDatePreset('all')}
-                      className="px-2 py-0.5 text-[11px] border border-ic-border bg-white hover:bg-gray-50"
-                    >
-                      Todo el historial
-                    </button>
-                  </div>
+              <div className="grid grid-cols-2 gap-3 p-3 bg-[#FAFAFA] border border-ic-border">
+                <div>
+                  <span className="block text-[11px] font-semibold uppercase text-ic-muted mb-1">
+                    Desde:
+                  </span>
+                  <input
+                    type="date"
+                    required
+                    value={purgeStartDate}
+                    onChange={(e) => setPurgeStartDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
+                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-3 p-3 bg-[#FAFAFA] border border-ic-border">
-                  <div>
-                    <span className="block text-[11px] text-ic-muted mb-1">Desde:</span>
-                    <input
-                      type="date"
-                      required
-                      value={purgeStartDate}
-                      onChange={(e) => setPurgeStartDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
-                    />
-                  </div>
-                  <div>
-                    <span className="block text-[11px] text-ic-muted mb-1">Hasta:</span>
-                    <input
-                      type="date"
-                      required
-                      value={purgeEndDate}
-                      onChange={(e) => setPurgeEndDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
-                    />
-                  </div>
+                <div>
+                  <span className="block text-[11px] font-semibold uppercase text-ic-muted mb-1">
+                    Hasta:
+                  </span>
+                  <input
+                    type="date"
+                    required
+                    value={purgeEndDate}
+                    onChange={(e) => setPurgeEndDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs font-mono border border-ic-border bg-white"
+                  />
                 </div>
               </div>
 
-              {/* 2. MODO DE DEPURACIÓN */}
-              <div className="space-y-2.5">
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                  2. ¿Qué conteos deseas depurar?
-                </label>
-
+              <div className="space-y-2">
                 <label
-                  className={`flex items-start gap-2.5 p-3 border cursor-pointer ${
+                  className={`flex items-center gap-2.5 p-3 border cursor-pointer text-xs ${
                     purgeMode === 'purgeable_only'
-                      ? 'border-ic-red bg-ic-redSoft/40'
+                      ? 'border-ic-red bg-ic-redSoft/40 font-semibold'
                       : 'border-ic-border bg-white'
                   }`}
                 >
@@ -884,20 +980,13 @@ export const App: React.FC = () => {
                     name="purgeMode"
                     checked={purgeMode === 'purgeable_only'}
                     onChange={() => setPurgeMode('purgeable_only')}
-                    className="mt-0.5 accent-ic-red"
+                    className="accent-ic-red"
                   />
-                  <div className="text-xs">
-                    <div className="font-semibold text-ic-dark">
-                      Todos los enlaces "Depurables" y pruebas automáticas
-                    </div>
-                    <div className="text-[11px] text-ic-muted mt-0.5">
-                      Limpia enlaces creados con el check <em>Depurable</em>, pruebas del simulador y subcampañas de test (ej. <code className="font-mono">prueba-cpanel</code>).
-                    </div>
-                  </div>
+                  <span>Todos los enlaces marcados como Depurables y pruebas</span>
                 </label>
 
                 <label
-                  className={`flex items-start gap-2.5 p-3 border cursor-pointer ${
+                  className={`flex items-start gap-2.5 p-3 border cursor-pointer text-xs ${
                     purgeMode === 'specific_target'
                       ? 'border-ic-red bg-ic-redSoft/40'
                       : 'border-ic-border bg-white'
@@ -910,10 +999,8 @@ export const App: React.FC = () => {
                     onChange={() => setPurgeMode('specific_target')}
                     className="mt-0.5 accent-ic-red"
                   />
-                  <div className="text-xs flex-1">
-                    <div className="font-semibold text-ic-dark">
-                      Seleccionar una subcampaña o prueba específica
-                    </div>
+                  <div className="flex-1">
+                    <div className="font-semibold">Seleccionar un registro específico</div>
                     {purgeMode === 'specific_target' && (
                       <select
                         value={purgeTargetId}
@@ -922,7 +1009,7 @@ export const App: React.FC = () => {
                       >
                         {records.map((r) => (
                           <option key={r.id} value={r.id}>
-                            {isTestRecord(r) ? '[PRUEBA] ' : ''}[{r.campaign}] {CHANNEL_LABELS[r.channel]} → {r.subcampaign} ({r.clicks} clics)
+                            [{r.campaign}_{r.period}] {r.subcampaign} ({r.clicks} clics)
                           </option>
                         ))}
                       </select>
@@ -931,17 +1018,14 @@ export const App: React.FC = () => {
                 </label>
               </div>
 
-              {/* 3. OPCIÓN DE ELIMINAR REGISTRO SI QUEDA EN CERO */}
-              <label className="flex items-center gap-2 text-xs text-ic-dark cursor-pointer pt-1">
+              <label className="flex items-center gap-2 text-xs text-ic-dark cursor-pointer">
                 <input
                   type="checkbox"
                   checked={purgeRemoveEmpty}
                   onChange={(e) => setPurgeRemoveEmpty(e.target.checked)}
                   className="accent-ic-red"
                 />
-                <span>
-                  Eliminar también el registro de prueba de la tabla si queda con <strong>0 clics</strong>
-                </span>
+                <span>Eliminar el registro si queda con 0 clics</span>
               </label>
 
               {purgeFeedback && (
@@ -954,17 +1038,16 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsPurgeModalOpen(false)}
-                  className="px-4 py-2 border border-ic-border bg-white text-xs font-medium text-ic-dark hover:bg-gray-50"
+                  className="px-4 py-2 border border-ic-border bg-white text-xs font-medium"
                 >
                   Cerrar
                 </button>
                 <button
                   type="submit"
                   disabled={purgeLoading}
-                  className="px-4 py-2 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5"
+                  className="px-4 py-2 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider"
                 >
-                  <FilterX className="w-3.5 h-3.5" />
-                  {purgeLoading ? 'Depurando...' : 'Depurar Conteos Ahora'}
+                  {purgeLoading ? 'Depurando...' : 'Depurar Ahora'}
                 </button>
               </div>
             </form>
@@ -977,135 +1060,192 @@ export const App: React.FC = () => {
          ===================================================================== */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-8">
         {/* ===================================================================
-            MÓDULO 01: REPORTERÍA Y CONTEOS (PÚBLICO)
+            MÓDULO 01: REPORTERÍA
            =================================================================== */}
         {activeModule === 'reports' && (
           <>
-            {/* Encabezado + Botones Depurar Pruebas y Exportar CSV */}
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-ic-border pb-5">
+            {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón con Dropdown + Periodo + Acciones */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-ic-border pb-5">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
-                  Módulo 01 • Reportería de Marketing (Consulta Pública)
-                </div>
-                <h1 className="text-3xl font-serif font-bold text-ic-dark">
-                  Conteo General por Canal, Campaña y Subcampaña
+                <h1 className="text-2xl font-serif font-bold text-ic-dark">
+                  Reportería de Enlaces y Campañas
                 </h1>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* 1 SOLO BOTÓN DE FILTRO DE FECHA CON DROPDOWN (Estilo Google Analytics/Ads) */}
+                <div className="relative" ref={dateDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTempPreset(datePreset);
+                      setTempStart(startDate);
+                      setTempEnd(endDate);
+                      setIsDateDropdownOpen((prev) => !prev);
+                    }}
+                    className="inline-flex items-center gap-2.5 px-3.5 py-2 bg-white border border-ic-border hover:border-ic-dark text-xs transition-colors"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-ic-red" />
+                    <span className="px-1.5 py-0.5 bg-gray-100 text-ic-slate font-medium">
+                      {DATE_PRESET_LABELS[datePreset]}
+                    </span>
+                    <span className="font-mono text-ic-dark font-semibold">
+                      {formatShortDateEs(startDate)} – {formatShortDateEs(endDate)}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-ic-muted" />
+                  </button>
+
+                  {isDateDropdownOpen && (
+                    <div className="absolute right-0 mt-1 z-50 bg-white border border-ic-border shadow-2xl w-[340px] sm:w-[540px] flex flex-col sm:flex-row">
+                      {/* Columna Izquierda: Lista de Opciones */}
+                      <div className="sm:w-52 border-b sm:border-b-0 sm:border-r border-ic-border py-1.5 max-h-80 overflow-y-auto">
+                        {(Object.keys(DATE_PRESET_LABELS) as DatePreset[]).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setTempPreset(key);
+                              if (key !== 'custom') {
+                                const r = computeDatesForPreset(key);
+                                setTempStart(r.start);
+                                setTempEnd(r.end);
+                              }
+                            }}
+                            className={`w-full text-left px-4 py-2 text-xs transition-colors flex items-center justify-between ${
+                              tempPreset === key
+                                ? 'bg-ic-redSoft text-ic-red font-semibold'
+                                : 'text-ic-dark hover:bg-gray-50'
+                            }`}
+                          >
+                            <span>{DATE_PRESET_LABELS[key]}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Columna Derecha: Rango de Fechas + Botones Cancelar / Aplicar */}
+                      <div className="flex-1 p-5 flex flex-col justify-between space-y-5">
+                        <div className="space-y-4">
+                          <div className="text-xs font-serif font-bold text-ic-dark">
+                            Rango de Fechas Seleccionado
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                                Fecha de inicio
+                              </label>
+                              <input
+                                type="date"
+                                value={tempStart}
+                                onChange={(e) => {
+                                  setTempStart(e.target.value);
+                                  setTempPreset('custom');
+                                }}
+                                className="w-full px-2.5 py-2 text-xs font-mono border border-ic-border bg-white focus:outline-none focus:border-ic-red"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                                Fecha de fin
+                              </label>
+                              <input
+                                type="date"
+                                value={tempEnd}
+                                onChange={(e) => {
+                                  setTempEnd(e.target.value);
+                                  setTempPreset('custom');
+                                }}
+                                className="w-full px-2.5 py-2 text-xs font-mono border border-ic-border bg-white focus:outline-none focus:border-ic-red"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-[#FAFAFA] border border-ic-border text-xs text-ic-muted">
+                            Periodo seleccionado:{' '}
+                            <strong className="text-ic-dark font-mono">
+                              {formatShortDateEs(tempStart)} – {formatShortDateEs(tempEnd)}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-ic-border">
+                          <button
+                            type="button"
+                            onClick={() => setIsDateDropdownOpen(false)}
+                            className="px-3.5 py-1.5 text-xs font-medium text-ic-muted hover:text-ic-dark"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDatePreset(tempPreset);
+                              setStartDate(tempStart);
+                              setEndDate(tempEnd);
+                              setIsDateDropdownOpen(false);
+                            }}
+                            className="px-4 py-1.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Selector de PERIODO */}
+                <div className="flex items-center gap-1.5 bg-white border border-ic-border px-3 py-2 text-xs">
+                  <span className="text-ic-muted font-medium">Periodo:</span>
+                  <select
+                    value={reportPeriodFilter}
+                    onChange={(e) => setReportPeriodFilter(e.target.value)}
+                    className="font-mono font-bold text-ic-dark bg-transparent focus:outline-none"
+                  >
+                    <option value="all">Todos</option>
+                    {periods.map((p) => (
+                      <option key={p.code} value={p.code}>
+                        {p.code} {p.is_active ? '(Activo)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Botón Depurar Pruebas */}
                 <button
                   type="button"
                   onClick={() => {
                     setPurgeFeedback(null);
                     setIsPurgeModalOpen(true);
                   }}
-                  className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-ic-redSoft border border-ic-border text-ic-dark text-xs font-medium tracking-wide transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-ic-redSoft border border-ic-border text-xs font-medium"
                 >
                   <FilterX className="w-3.5 h-3.5 text-ic-red" />
-                  <span>Depurar Pruebas</span>
+                  <span>Depurar</span>
                   {purgeableRecordsCount > 0 && (
-                    <span className="px-1.5 py-0.2 bg-ic-red text-white text-[10px] font-mono font-bold">
+                    <span className="px-1.5 bg-ic-red text-white text-[10px] font-mono font-bold">
                       {purgeableRecordsCount}
                     </span>
                   )}
                 </button>
 
+                {/* Exportar CSV */}
                 <button
                   type="button"
                   onClick={handleExportReportCsv}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-ic-dark hover:bg-black text-white text-xs font-medium tracking-wide transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-ic-dark hover:bg-black text-white text-xs font-medium"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Exportar Reporte CSV
+                  <span>Exportar CSV</span>
                 </button>
-              </div>
-            </div>
-
-            {/* BARRA DE FILTROS DE FECHA (CON CALENDARIO Y ATAJOS) Y CAMPAÑA (ORIGEN) */}
-            <div className="bg-white border border-ic-border p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                {/* Atajos rápidos de fecha */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted mr-1 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-ic-red" />
-                    Periodo:
-                  </span>
-                  {(
-                    [
-                      ['today', 'Hoy'],
-                      ['this_week', 'Esta semana'],
-                      ['last_7_days', 'Últimos 7 días'],
-                      ['last_30_days', '30 días antes'],
-                      ['last_month', 'Mes pasado'],
-                      ['all', 'Todo'],
-                    ] as [DatePreset, string][]
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => applyDatePreset(key)}
-                      className={`px-2.5 py-1 text-xs border transition-colors ${
-                        datePreset === key
-                          ? 'bg-ic-red text-white border-ic-red font-medium'
-                          : 'bg-white text-ic-slate border-ic-border hover:bg-gray-50'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Calendario de Rango de Fechas (Desde - Hasta) + Filtro de Campaña Origen */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="text-ic-muted">Desde:</span>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => {
-                        setStartDate(e.target.value);
-                        setDatePreset('custom');
-                      }}
-                      className="px-2 py-1 text-xs font-mono border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="text-ic-muted">Hasta:</span>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => {
-                        setEndDate(e.target.value);
-                        setDatePreset('custom');
-                      }}
-                      className="px-2 py-1 text-xs font-mono border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-xs pl-2 border-l border-ic-border">
-                    <span className="text-ic-muted font-medium">Campaña (Origen):</span>
-                    <select
-                      value={reportCampaignFilter}
-                      onChange={(e) => setReportCampaignFilter(e.target.value)}
-                      className="px-2.5 py-1 text-xs font-mono border border-ic-border bg-white font-semibold text-ic-dark"
-                    >
-                      <option value="all">Todas (202710–202930)</option>
-                      {CAMPAIGN_ORIGINS.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
               </div>
             </div>
 
             {/* 1. CONTEO GENERAL POR CANAL */}
             <section className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-serif font-bold text-ic-dark uppercase tracking-wider">
+                <h2 className="text-xs font-serif font-bold text-ic-dark uppercase tracking-wider">
                   1. Conteo General por Canal
                 </h2>
                 {selectedChannelFilter !== 'all' && (
@@ -1113,7 +1253,7 @@ export const App: React.FC = () => {
                     onClick={() => setSelectedChannelFilter('all')}
                     className="text-xs text-ic-red font-medium hover:underline"
                   >
-                    Ver todos los canales
+                    Ver todos
                   </button>
                 )}
               </div>
@@ -1132,7 +1272,7 @@ export const App: React.FC = () => {
                     {channelTotals.grandTotalClicks.toLocaleString()}
                   </div>
                   <div className="mt-1 text-[11px] text-ic-muted tabular-nums">
-                    {channelTotals.grandTotalUnique.toLocaleString()} personas únicas
+                    {channelTotals.grandTotalUnique.toLocaleString()} únicos
                   </div>
                 </button>
 
@@ -1169,21 +1309,94 @@ export const App: React.FC = () => {
               </div>
             </section>
 
-            {/* 2. DESGLOSE POR CAMPAÑA (ORIGEN) Y SUBCAMPAÑA */}
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-sm font-serif font-bold text-ic-dark uppercase tracking-wider">
-                  2. Subdivisiones por Campaña (Origen) y Subcampaña / Conjunto de Anuncios
-                </h2>
+            {/* 2. NUEVO BLOQUE: RESULTADOS POR CAMPAÑA */}
+            <section className="bg-white border border-ic-border">
+              <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-1.5 h-5 bg-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    2. Resultados por Campaña
+                  </h2>
+                </div>
+                <span className="text-xs font-mono text-ic-muted">
+                  {resultsByCampaign.length} campañas activas
+                </span>
               </div>
 
-              <div className="space-y-6">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                      <th className="py-2.5 px-6">Campaña</th>
+                      <th className="py-2.5 px-4">Periodo</th>
+                      <th className="py-2.5 px-4">Código de Atención</th>
+                      <th className="py-2.5 px-4">Canales Asociados</th>
+                      <th className="py-2.5 px-4 w-44">Participación</th>
+                      <th className="py-2.5 px-4 text-right">Clics</th>
+                      <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ic-border text-xs">
+                    {resultsByCampaign.map((item) => {
+                      const pct = Math.round(
+                        (item.clicks / Math.max(1, channelTotals.grandTotalClicks)) * 100
+                      );
+                      return (
+                        <tr key={item.attentionCode} className="hover:bg-gray-50">
+                          <td className="py-3 px-6 font-mono font-bold text-ic-dark">
+                            {item.campaign}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-ic-slate">
+                            {item.period}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                              {item.attentionCode}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-ic-muted">
+                            {item.channelsList.join(', ')}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-gray-100">
+                                <div
+                                  className="h-full bg-ic-red"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-mono text-ic-muted w-8 text-right">
+                                {pct}%
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                            {item.clicks.toLocaleString()}
+                          </td>
+                          <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                            {item.unique.toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {/* 3. SUBDIVISIONES POR CANAL, PERIODO, CAMPAÑA Y UTM / ASESOR */}
+            <section className="space-y-4">
+              <h2 className="text-xs font-serif font-bold text-ic-dark uppercase tracking-wider">
+                3. Desglose por Canal, Periodo y Escenario (UTM / Asesor / Carrera)
+              </h2>
+
+              <div className="space-y-5">
                 {hierarchicalReport.map((channelBlock) => (
                   <div
                     key={channelBlock.channel}
                     className="bg-white border border-ic-border"
                   >
-                    <div className="px-6 py-4 bg-white border-b border-ic-border flex items-center justify-between">
+                    <div className="px-6 py-3.5 bg-white border-b border-ic-border flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-1.5 h-5 bg-ic-red" />
                         <h3 className="text-base font-serif font-bold text-ic-dark">
@@ -1191,39 +1404,36 @@ export const App: React.FC = () => {
                         </h3>
                       </div>
                       <div className="flex items-center gap-6 text-xs tabular-nums">
-                        <span>
-                          Total Canal:{' '}
-                          <strong className="font-bold text-ic-dark text-sm">
-                            {channelBlock.totalClicks.toLocaleString()} clics
-                          </strong>
-                        </span>
+                        <strong className="font-bold text-ic-dark text-sm">
+                          {channelBlock.totalClicks.toLocaleString()} clics
+                        </strong>
                         <span className="text-ic-muted">
                           {channelBlock.totalUnique.toLocaleString()} únicos
                         </span>
                       </div>
                     </div>
 
-                    {channelBlock.campaigns.length === 0 ? (
+                    {channelBlock.periods.length === 0 ? (
                       <div className="p-6 text-xs text-ic-muted">
-                        Sin clics registrados en el rango de fechas seleccionado.
+                        Sin registros en el rango de fechas seleccionado.
                       </div>
                     ) : (
                       <div className="divide-y divide-ic-border">
-                        {channelBlock.campaigns.map((camp) => {
-                          const expandKey = `${channelBlock.channel}::${camp.campaign}`;
-                          const isOpen = expandedCampaigns[expandKey] ?? true;
+                        {channelBlock.periods.map((perBlock) => {
+                          const expandKey = `${channelBlock.channel}::${perBlock.period}`;
+                          const isOpen = expandedGroups[expandKey] ?? true;
 
                           return (
                             <div key={expandKey}>
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setExpandedCampaigns((prev) => ({
+                                  setExpandedGroups((prev) => ({
                                     ...prev,
                                     [expandKey]: !isOpen,
                                   }))
                                 }
-                                className="w-full px-6 py-3 bg-[#FAFAFA] hover:bg-gray-100 flex items-center justify-between text-left"
+                                className="w-full px-6 py-2.5 bg-[#FAFAFA] hover:bg-gray-100 flex items-center justify-between text-left"
                               >
                                 <div className="flex items-center gap-2.5">
                                   {isOpen ? (
@@ -1232,22 +1442,19 @@ export const App: React.FC = () => {
                                     <ChevronRight className="w-4 h-4 text-ic-muted" />
                                   )}
                                   <span className="text-xs font-semibold uppercase tracking-wider text-ic-muted">
-                                    Campaña (Origen):
+                                    Periodo:
                                   </span>
                                   <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
-                                    {camp.campaign}
-                                  </span>
-                                  <span className="text-[11px] text-ic-muted">
-                                    ({camp.subcampaigns.length} subcampañas)
+                                    {perBlock.period}
                                   </span>
                                 </div>
 
                                 <div className="flex items-center gap-6 text-xs tabular-nums">
                                   <span className="font-bold text-ic-dark">
-                                    {camp.clicks.toLocaleString()} clics
+                                    {perBlock.clicks.toLocaleString()} clics
                                   </span>
                                   <span className="text-ic-muted w-24 text-right">
-                                    {camp.unique.toLocaleString()} únicos
+                                    {perBlock.unique.toLocaleString()} únicos
                                   </span>
                                 </div>
                               </button>
@@ -1256,52 +1463,39 @@ export const App: React.FC = () => {
                                 <table className="w-full text-left border-collapse">
                                   <thead>
                                     <tr className="border-t border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                                      <th className="py-2 pl-12 pr-4">
+                                      <th className="py-2 pl-12 pr-4">Campaña</th>
+                                      <th className="py-2 px-4">
                                         {channelBlock.channel === 'web_institucional'
-                                          ? 'Subcampaña (Carrera o Página Detectada)'
-                                          : channelBlock.channel === 'tiktok_ads'
-                                          ? 'Subcampaña / Conjunto de Anuncios'
-                                          : 'Subcampaña'}
+                                          ? 'Carrera / Página Detectada'
+                                          : channelBlock.channel === 'asesor_prospector'
+                                          ? 'Asesor / Prospector'
+                                          : 'UTM / Origen'}
                                       </th>
-                                      <th className="py-2 px-4">Enlace / URL Origen</th>
-                                      <th className="py-2 px-4 w-40">Proporción</th>
+                                      <th className="py-2 px-4">Código de Atención</th>
                                       <th className="py-2 px-4 text-right">Clics</th>
-                                      <th className="py-2 pr-6 pl-4 text-right w-32">Únicos / Acción</th>
+                                      <th className="py-2 pr-6 pl-4 text-right w-32">Únicos</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 text-xs">
-                                    {camp.subcampaigns.map((sub) => {
-                                      const pct = Math.round(
-                                        (sub.clicks / Math.max(1, camp.clicks)) * 100
-                                      );
+                                    {perBlock.subcampaigns.map((sub) => {
                                       const isPurgeableSub = isTestRecord(sub);
                                       return (
                                         <tr key={sub.id} className="hover:bg-gray-50/80">
-                                          <td className="py-2.5 pl-12 pr-4 font-medium text-ic-dark">
+                                          <td className="py-2.5 pl-12 pr-4 font-mono font-semibold text-ic-dark">
+                                            {sub.campaign}
+                                          </td>
+                                          <td className="py-2.5 px-4 font-medium text-ic-dark">
                                             <div className="flex items-center gap-2">
                                               <span>{sub.subcampaign}</span>
                                               {isPurgeableSub && (
-                                                <span className="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                                  DEPURABLE / PRUEBA
+                                                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
+                                                  PRUEBA
                                                 </span>
                                               )}
                                             </div>
                                           </td>
                                           <td className="py-2.5 px-4 font-mono text-[11px] text-ic-muted">
-                                            {sub.url_reference || sub.short_link}
-                                          </td>
-                                          <td className="py-2.5 px-4">
-                                            <div className="flex items-center gap-2">
-                                              <div className="flex-1 h-1.5 bg-gray-100 overflow-hidden">
-                                                <div
-                                                  className="h-full bg-ic-red"
-                                                  style={{ width: `${pct}%` }}
-                                                />
-                                              </div>
-                                              <span className="text-[10px] font-mono text-ic-muted w-8 text-right">
-                                                {pct}%
-                                              </span>
-                                            </div>
+                                            {sub.campaign}_{sub.period}
                                           </td>
                                           <td className="py-2.5 px-4 text-right font-bold text-ic-dark tabular-nums">
                                             {sub.clicks.toLocaleString()}
@@ -1312,9 +1506,16 @@ export const App: React.FC = () => {
                                               {isPurgeableSub && (
                                                 <button
                                                   type="button"
-                                                  onClick={() => openQuickPurgeForRecord(sub)}
+                                                  onClick={() => {
+                                                    setPurgeMode('specific_target');
+                                                    setPurgeTargetId(sub.id);
+                                                    setPurgeStartDate('2025-01-01');
+                                                    setPurgeEndDate('2029-12-31');
+                                                    setPurgeRemoveEmpty(true);
+                                                    setPurgeFeedback(null);
+                                                    setIsPurgeModalOpen(true);
+                                                  }}
                                                   className="px-1.5 py-0.5 text-[10px] font-medium text-ic-red hover:bg-ic-redSoft border border-ic-red/30"
-                                                  title="Depurar o eliminar este conteo de prueba"
                                                 >
                                                   Limpiar
                                                 </button>
@@ -1337,17 +1538,12 @@ export const App: React.FC = () => {
               </div>
             </section>
 
-            {/* 3. RANKING DE CARRERAS DEL SITIO WEB (/carrera/...) */}
+            {/* 4. RANKING DE CARRERAS DEL SITIO WEB (/carrera/...) */}
             <section className="bg-white border border-ic-border p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-ic-border pb-4">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red">
-                    Sitio Web Institucional (icontinental.edu.pe/carrera/...)
-                  </div>
-                  <h2 className="text-lg font-serif font-bold text-ic-dark mt-0.5">
-                    Ranking de Carreras que Generan Más Clics
-                  </h2>
-                </div>
+              <div className="border-b border-ic-border pb-3">
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  4. Ranking de Carreras del Portal Web (/carrera/...)
+                </h2>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
@@ -1392,322 +1588,306 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 02: GENERADOR DE ENLACES (PROTEGIDO CON LOGIN)
+            GENERADOR DE ENLACES (Sin alias cortos manuales, UTM automático)
            =================================================================== */}
         {activeModule === 'generator' && isAuthenticated && (
-          <div className="space-y-8">
-            <div className="border-b border-ic-border pb-5">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
-                Módulo 02 • Creación y Enlaces Activos
-              </div>
-              <h1 className="text-3xl font-serif font-bold text-ic-dark">
-                Generador Unificado de Enlaces
+          <div className="space-y-6">
+            <div className="border-b border-ic-border pb-4 flex items-center justify-between">
+              <h1 className="text-2xl font-serif font-bold text-ic-dark">
+                Generador de Enlaces
               </h1>
-              <p className="text-xs text-ic-muted mt-1">
-                Visualiza primero el resultado de tu enlace normal con parámetros (<code className="font-mono text-ic-dark">/CRM</code>, <code className="font-mono text-ic-dark">/tiktok</code>, etc.), decide si deseas usar un alias corto y marca si será un enlace depurable de prueba.
-              </p>
+              <span className="text-xs font-mono text-ic-muted">
+                Periodo Activo Global: <strong className="text-ic-red">{activePeriod}</strong>
+              </span>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* FORMULARIO UNIFICADO */}
+              {/* FORMULARIO CREADOR */}
               <div className="lg:col-span-5 bg-white border border-ic-border p-6 space-y-5">
-                <div className="flex items-center gap-2.5 border-b border-ic-border pb-3">
-                  <div className="w-1.5 h-5 bg-ic-red" />
-                  <h2 className="text-base font-serif font-bold text-ic-dark">
-                    Configurar Nuevo Enlace
-                  </h2>
-                </div>
-
-                <form onSubmit={handleCreateLink} className="space-y-5">
-                  {/* 1. CANAL */}
+                <form onSubmit={handleCreateLink} className="space-y-4">
+                  {/* 1. ESCENARIO / CANAL */}
                   <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                      1. CANAL *
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
+                      1. Escenario *
                     </label>
                     <select
                       value={genChannel}
                       onChange={(e) => setGenChannel(e.target.value as ChannelKey)}
-                      className="w-full px-3 py-2.5 text-xs font-medium border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
+                      className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
                     >
+                      <option value="link_ads">Link Ads (TikTok, Google Display, PMax, YouTube)</option>
                       <option value="mailing_sms_chattigo">
-                        Mailing / SMS / Chattigo (Slug base: /CRM)
+                        Mailing / SMS / Chattigo (/CRM)
                       </option>
-                      <option value="tiktok_ads">TikTok Ads (Slug base: /tiktok)</option>
-                      <option value="landing_page">Landing Pages (Slug base: /landing)</option>
-                      <option value="web_institucional">
-                        Sitio Web Institucional (Slug base: /whatsapp-web)
-                      </option>
+                      <option value="asesor_prospector">Asesor / Prospector</option>
+                      <option value="web_institucional">Portal Web Institucional</option>
                     </select>
                   </div>
 
-                  {/* 2. CAMPAÑA (ORIGEN) * — SELECT 202710 A 202930 */}
-                  <div className="grid grid-cols-1 gap-4 p-4 bg-[#FAFAFA] border border-ic-border">
+                  {/* SUB-SELECTOR SEGÚN ESCENARIO */}
+                  {genChannel === 'link_ads' && (
                     <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
-                        2. CAMPAÑA (ORIGEN) *
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
+                        Plataforma de Pauta (utm) *
                       </label>
                       <select
-                        value={genCampaign}
-                        onChange={(e) => setGenCampaign(e.target.value)}
-                        className="w-full px-3 py-2.5 text-xs font-mono font-bold border border-ic-border bg-white text-ic-dark focus:outline-none focus:border-ic-red"
+                        value={genLinkAdsUtm}
+                        onChange={(e) => setGenLinkAdsUtm(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                       >
-                        {CAMPAIGN_ORIGINS.map((code) => (
-                          <option key={code} value={code}>
-                            {code}
+                        {LINK_ADS_PLATFORMS.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
                           </option>
                         ))}
                       </select>
                     </div>
+                  )}
 
-                    {/* 3. SUBCAMPAÑA */}
+                  {genChannel === 'mailing_sms_chattigo' && (
                     <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
-                        3. SUBCAMPAÑA {genChannel === 'tiktok_ads' ? '(CONJUNTO DE ANUNCIOS)' : ''} *
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
+                        Medio de Envío (utm) *
+                      </label>
+                      <select
+                        value={genCrmOrigin}
+                        onChange={(e) => setGenCrmOrigin(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                      >
+                        {CRM_ORIGINS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {genChannel === 'asesor_prospector' && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
+                          Seleccionar Asesor *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('tools')}
+                          className="text-[11px] text-ic-red font-medium hover:underline"
+                        >
+                          + Crear Asesor
+                        </button>
+                      </div>
+                      <select
+                        value={genAdvisorName}
+                        onChange={(e) => setGenAdvisorName(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white"
+                      >
+                        {advisors.map((adv) => (
+                          <option key={adv.id} value={adv.name}>
+                            {adv.name} (+{adv.phone_number})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {genChannel === 'web_institucional' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
+                        URL o Carrera Específica (Opcional)
                       </label>
                       <input
                         type="text"
-                        required
-                        value={genSubcampaign}
-                        onChange={(e) => setGenSubcampaign(e.target.value)}
-                        placeholder={
-                          genChannel === 'mailing_sms_chattigo'
-                            ? 'Ej: sms-cierre-inscripciones o chattigo-becas'
-                            : genChannel === 'tiktok_ads'
-                            ? 'Ej: Conjunto 01 - Diseño de Modas'
-                            : 'Ej: Botón Principal'
-                        }
-                        className="w-full px-3 py-2 text-xs border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
+                        value={genPortalSubsite}
+                        onChange={(e) => setGenPortalSubsite(e.target.value)}
+                        placeholder="https://icontinental.edu.pe/carrera/diseno-de-modas/"
+                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                       />
                     </div>
-                  </div>
+                  )}
 
-                  {/* 4. DESTINO */}
-                  <div className="space-y-3">
-                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
-                      4. DESTINO DEL ENLACE
-                    </label>
-                    <div className="grid grid-cols-2 gap-2.5">
+                  {/* 2. CAMPAÑA (Seleccionar existente o escribir nueva en MAYÚSCULA_CON_GUION_BAJO) */}
+                  <div className="p-3.5 bg-[#FAFAFA] border border-ic-border space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                        2. Campaña *
+                      </label>
                       <button
                         type="button"
-                        onClick={() => setGenDestType('whatsapp')}
-                        className={`py-2 px-3 border text-xs font-medium flex items-center justify-center gap-2 ${
-                          genDestType === 'whatsapp'
-                            ? 'border-ic-dark bg-ic-dark text-white'
-                            : 'border-ic-border bg-white text-ic-dark hover:bg-gray-50'
-                        }`}
+                        onClick={() =>
+                          setGenCampaignMode((m) => (m === 'select' ? 'new' : 'select'))
+                        }
+                        className="text-[11px] text-ic-red font-semibold hover:underline"
                       >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        Hacia WhatsApp
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setGenDestType('url')}
-                        className={`py-2 px-3 border text-xs font-medium flex items-center justify-center gap-2 ${
-                          genDestType === 'url'
-                            ? 'border-ic-dark bg-ic-dark text-white'
-                            : 'border-ic-border bg-white text-ic-dark hover:bg-gray-50'
-                        }`}
-                      >
-                        <Globe className="w-3.5 h-3.5" />
-                        Hacia Página Web
+                        {genCampaignMode === 'select'
+                          ? '+ Nueva campaña'
+                          : 'Elegir existente'}
                       </button>
                     </div>
 
-                    {genDestType === 'whatsapp' ? (
-                      <div className="space-y-3 pt-1">
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <label className="text-xs text-ic-slate">Número de WhatsApp</label>
-                            <button
-                              type="button"
-                              onClick={() => setActiveModule('tools')}
-                              className="text-[11px] text-ic-red hover:underline font-medium"
-                            >
-                              Configurar números →
-                            </button>
-                          </div>
-                          <select
-                            value={genWaPhone}
-                            onChange={(e) => setGenWaPhone(e.target.value)}
-                            className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
-                          >
-                            {waNumbers.map((w) => (
-                              <option key={w.id} value={w.phone_number}>
-                                {w.label} (+{w.phone_number})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs text-ic-slate mb-1">
-                            Mensaje de saludo en WhatsApp
-                          </label>
-                          <textarea
-                            rows={2}
-                            value={genWaMessage}
-                            onChange={(e) => setGenWaMessage(e.target.value)}
-                            className="w-full px-3 py-2 text-xs border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
-                          />
-                        </div>
-                      </div>
+                    {genCampaignMode === 'select' ? (
+                      <select
+                        value={genSelectedCampaign}
+                        onChange={(e) => setGenSelectedCampaign(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                      >
+                        {campaigns.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
                     ) : (
-                      <div className="pt-1">
-                        <label className="block text-xs text-ic-slate mb-1">
-                          URL de Destino Final
-                        </label>
+                      <div>
                         <input
-                          type="url"
+                          type="text"
                           required
-                          value={genDestUrl}
-                          onChange={(e) => setGenDestUrl(e.target.value)}
-                          placeholder="https://icontinental.edu.pe/admision/"
-                          className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                          maxLength={30}
+                          value={genNewCampaignInput}
+                          onChange={(e) =>
+                            setGenNewCampaignInput(sanitizeCampaignInput(e.target.value))
+                          }
+                          placeholder="EJ: NURTURING_CHATTIGO"
+                          className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white focus:outline-none focus:border-ic-red"
                         />
+                        <div className="text-[10px] text-ic-muted mt-1 flex justify-between">
+                          <span>Solo MAYÚSCULAS y _ (espacio = _)</span>
+                          <span className="font-mono">{genNewCampaignInput.length}/30</span>
+                        </div>
                       </div>
                     )}
+
+                    {/* 3. PERIODO */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                          3. Periodo *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('tools')}
+                          className="text-[11px] text-ic-red hover:underline"
+                        >
+                          Gestionar periodos
+                        </button>
+                      </div>
+                      <select
+                        value={genPeriod}
+                        onChange={(e) => setGenPeriod(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                      >
+                        {periods.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.code} {p.is_active ? '(Activo Global)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  {/* 5. RESULTADO DEL ENLACE NORMAL + CHECKBOX ALIAS CORTO + CHECKBOX DEPURABLE */}
-                  <div className="p-4 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                        5. Resultado del Enlace Normal:
-                      </span>
-                      <span className="text-[10px] font-mono text-ic-red bg-ic-redSoft px-2 py-0.5">
-                        Listo sin alias
+                  {/* Número de WhatsApp (Para canales distintos de Asesor) */}
+                  {genChannel !== 'asesor_prospector' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                        Número de WhatsApp Destino
+                      </label>
+                      <select
+                        value={genWaPhone}
+                        onChange={(e) => setGenWaPhone(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
+                      >
+                        {waNumbers.map((w) => (
+                          <option key={w.id} value={w.phone_number}>
+                            {w.label} (+{w.phone_number})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Vista previa del Mensaje Pre-rellenado con Código de Atención */}
+                  <div className="p-3 bg-[#FAFAFA] border border-ic-border space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                      <span>Mensaje Automático WhatsApp</span>
+                      <span className="text-ic-red font-mono">
+                        {effectiveCampaign}_{genPeriod}
                       </span>
                     </div>
+                    <div className="text-xs text-ic-dark font-mono bg-white p-2.5 border border-ic-border leading-relaxed">
+                      {effectiveWaMessage}
+                    </div>
+                  </div>
 
+                  {/* ENLACE FINAL GENERADO POR EL SISTEMA */}
+                  <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-2.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                      Enlace Final Generado (utm=):
+                    </div>
                     <div className="p-2.5 bg-white border border-ic-border font-mono text-[11px] text-ic-dark break-all select-all">
-                      {previewNormalUrl}
+                      {generatedSystemUrl}
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center justify-between pt-1">
                       <button
                         type="button"
-                        onClick={() => copyToClipboard(previewNormalUrl, 'normal-preview')}
-                        className="px-3 py-1.5 bg-white border border-ic-border hover:bg-gray-50 text-ic-dark text-xs font-medium flex items-center gap-1.5"
+                        onClick={() => copyToClipboard(generatedSystemUrl, 'gen-preview')}
+                        className="px-3 py-1.5 bg-ic-dark text-white text-xs font-medium flex items-center gap-1.5"
                       >
-                        {copiedKey === 'normal-preview' ? (
+                        {copiedKey === 'gen-preview' ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-green-700" /> Enlace Normal Copiado
+                            <Check className="w-3.5 h-3.5" /> Copiado
                           </>
                         ) : (
                           <>
-                            <Copy className="w-3.5 h-3.5" /> Copiar Enlace Normal
+                            <Copy className="w-3.5 h-3.5" /> Copiar Enlace
                           </>
                         )}
                       </button>
 
-                      <label className="flex items-center gap-2 text-xs font-medium text-ic-dark cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={useShortAlias}
-                          onChange={(e) => setUseShortAlias(e.target.checked)}
-                          className="accent-ic-red"
-                        />
-                        Quiero usar un alias corto
-                      </label>
-                    </div>
-
-                    {/* Solo si el usuario decide que quiere un alias corto */}
-                    {useShortAlias && (
-                      <div className="pt-3 mt-2 border-t border-ic-border space-y-2">
-                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-red">
-                          Escribe tu Alias Corto:
-                        </label>
-                        <div className="flex items-center border border-ic-border bg-white">
-                          <span className="px-2.5 py-2 bg-gray-50 text-[11px] font-mono text-ic-muted border-r border-ic-border">
-                            trace.icontinental.edu.pe/
-                          </span>
-                          <input
-                            type="text"
-                            required={useShortAlias}
-                            value={customSlug}
-                            onChange={(e) =>
-                              setCustomSlug(
-                                e.target.value.replace(/[^a-zA-Z0-9\-_]/g, '-')
-                              )
-                            }
-                            placeholder="ej: sms-cierre o tt-modas"
-                            className="w-full px-2.5 py-2 text-xs font-mono focus:outline-none"
-                          />
-                        </div>
-                        <div className="text-[11px] font-mono text-ic-muted">
-                          Quedará como: <strong className="text-ic-dark">{previewShortAliasUrl}</strong>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Checkbox para permitir si será un enlace depurable (de prueba) */}
-                    <div className="pt-3 border-t border-ic-border">
-                      <label className="flex items-start gap-2.5 text-xs text-ic-dark cursor-pointer">
+                      <label className="flex items-center gap-1.5 text-xs text-ic-dark cursor-pointer">
                         <input
                           type="checkbox"
                           checked={genIsPurgeable}
                           onChange={(e) => setGenIsPurgeable(e.target.checked)}
-                          className="mt-0.5 accent-ic-red"
+                          className="accent-ic-red"
                         />
-                        <div>
-                          <span className="font-semibold flex items-center gap-1.5">
-                            <FlaskConical className="w-3.5 h-3.5 text-ic-red" />
-                            Permitir depurar conteos (Marcar como enlace de prueba / depurable)
-                          </span>
-                          <span className="block text-[11px] text-ic-muted mt-0.5">
-                            Si lo activas, podrás limpiar sus clics por rango de fechas cuando termines tus pruebas.
-                          </span>
-                        </div>
+                        <FlaskConical className="w-3.5 h-3.5 text-ic-red" />
+                        <span>Es prueba (depurable)</span>
                       </label>
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-3 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider transition-colors flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
-                    {useShortAlias
-                      ? 'Guardar con Alias Corto en mi Tabla'
-                      : 'Registrar Enlace Normal en mi Tabla'}
+                    Guardar y Copiar Enlace
                   </button>
 
                   {genFeedbackUrl && (
-                    <div className="p-3 bg-green-50 border border-green-200 text-xs flex items-center justify-between">
-                      <span className="font-mono font-semibold text-green-900 truncate mr-2">
-                        {genFeedbackUrl}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(genFeedbackUrl, 'saved-url')}
-                        className="px-2.5 py-1 bg-green-800 text-white text-[11px] font-medium flex-shrink-0"
-                      >
-                        {copiedKey === 'saved-url' ? 'Copiado' : 'Copiar'}
-                      </button>
+                    <div className="p-2.5 bg-green-50 border border-green-200 text-xs text-green-900 font-mono truncate">
+                      Guardado: {genFeedbackUrl}
                     </div>
                   )}
                 </form>
               </div>
 
-              {/* LISTA DE ENLACES REGISTRADOS */}
+              {/* LISTA DE ENLACES GENERADOS */}
               <div className="lg:col-span-7 bg-white border border-ic-border">
-                <div className="p-5 border-b border-ic-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-serif font-bold text-ic-dark">
-                      Enlaces Registrados ({links.length})
-                    </h2>
-                    <p className="text-xs text-ic-muted">
-                      Incluye el enlace maestro <code className="font-mono text-ic-red">/CRM</code> y todos tus enlaces por campaña.
-                    </p>
-                  </div>
+                <div className="p-4 border-b border-ic-border flex items-center justify-between gap-3">
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    Enlaces Activos ({links.length})
+                  </h2>
 
-                  <div className="relative w-full sm:w-64">
+                  <div className="relative w-60">
                     <Search className="w-3.5 h-3.5 text-ic-muted absolute left-3 top-2.5" />
                     <input
                       type="text"
                       value={linkSearch}
                       onChange={(e) => setLinkSearch(e.target.value)}
-                      placeholder="Buscar por 202710, /CRM, subcampaña..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs border border-ic-border focus:outline-none focus:border-ic-dark"
+                      placeholder="Buscar campaña, periodo, utm..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs border border-ic-border focus:outline-none"
                     />
                   </div>
                 </div>
@@ -1716,117 +1896,92 @@ export const App: React.FC = () => {
                   {links
                     .filter(
                       (l) =>
-                        l.title.toLowerCase().includes(linkSearch.toLowerCase()) ||
-                        l.slug.toLowerCase().includes(linkSearch.toLowerCase()) ||
                         l.campaign.toLowerCase().includes(linkSearch.toLowerCase()) ||
+                        l.period.toLowerCase().includes(linkSearch.toLowerCase()) ||
                         l.subcampaign.toLowerCase().includes(linkSearch.toLowerCase())
                     )
-                    .map((link) => {
-                      const activeUrl = `https://trace.icontinental.edu.pe/${link.slug}`;
-                      return (
-                        <div
-                          key={link.id}
-                          className="p-5 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                        >
-                          <div className="space-y-1.5 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-gray-100 text-ic-dark">
-                                {CHANNEL_LABELS[link.channel]}
+                    .map((link) => (
+                      <div
+                        key={link.id}
+                        className="p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase px-2 py-0.5 bg-gray-100 text-ic-dark">
+                              {CHANNEL_LABELS[link.channel]}
+                            </span>
+                            <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
+                              {link.campaign}_{link.period}
+                            </span>
+                            <span className="text-xs font-mono text-ic-slate">
+                              utm={link.subcampaign}
+                            </span>
+                            {link.is_purgeable && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
+                                DEPURABLE
                               </span>
-                              <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
-                                {link.campaign}
-                              </span>
-                              <span className="text-xs font-semibold text-ic-dark">
-                                {link.subcampaign}
-                              </span>
-                              {link.is_purgeable && (
-                                <span className="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                  DEPURABLE
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="font-mono text-xs font-bold text-ic-red break-all">
-                              {activeUrl}
-                            </div>
-
-                            {link.has_custom_alias && (
-                              <div className="text-[11px] font-mono text-ic-muted truncate">
-                                Enlace normal equivalente: {link.normal_url}
-                              </div>
-                            )}
-
-                            <div className="text-xs text-ic-muted flex flex-wrap items-center gap-2">
-                              <span>
-                                {link.title} •{' '}
-                                <strong className="text-ic-dark tabular-nums">
-                                  {link.total_clicks.toLocaleString()} clics
-                                </strong>
-                              </span>
-                              {!link.is_master_route && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    DataEngine.togglePurgeable({
-                                      id: link.id,
-                                      targetId: `${link.channel}::${link.campaign}::${link.subcampaign}`,
-                                      isPurgeable: !link.is_purgeable,
-                                    });
-                                    loadData();
-                                  }}
-                                  className="text-[11px] text-ic-red hover:underline"
-                                >
-                                  {link.is_purgeable
-                                    ? 'Quitar marca depurable'
-                                    : 'Marcar como depurable'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 self-start sm:self-center flex-shrink-0">
-                            <button
-                              onClick={() => copyToClipboard(activeUrl, `link-${link.id}`)}
-                              className="px-3 py-2 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center gap-1.5"
-                            >
-                              {copiedKey === `link-${link.id}` ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5" /> Copiado
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3.5 h-3.5" /> Copiar
-                                </>
-                              )}
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setQrSelectedUrl(activeUrl);
-                                setActiveModule('tools');
-                              }}
-                              className="p-2 text-ic-dark hover:text-ic-red border border-ic-border bg-white"
-                              title="Generar Código QR para este enlace"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                            </button>
-
-                            {!link.is_master_route && (
-                              <button
-                                onClick={() => {
-                                  DataEngine.deleteLink(link.id);
-                                  loadData();
-                                }}
-                                className="p-2 text-ic-muted hover:text-ic-red border border-ic-border bg-white"
-                                title="Eliminar"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
                             )}
                           </div>
+
+                          <div className="font-mono text-xs text-ic-dark break-all">
+                            {link.normal_url}
+                          </div>
+
+                          {link.whatsapp_message && (
+                            <div className="text-[11px] text-ic-muted truncate">
+                              {link.whatsapp_message}
+                            </div>
+                          )}
                         </div>
-                      );
-                    })}
+
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => copyToClipboard(link.normal_url, `link-${link.id}`)}
+                            className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center gap-1"
+                          >
+                            {copiedKey === `link-${link.id}` ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" /> Copiado
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" /> Copiar
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setQrSelectedUrl(link.normal_url);
+                              setActiveModule('tools');
+                            }}
+                            className="p-1.5 border border-ic-border bg-white hover:text-ic-red"
+                            title="Código QR"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                          </button>
+
+                          {!link.is_master_route && (
+                            <button
+                              onClick={() =>
+                                setConfirmDelete({
+                                  title: '¿Seguro que quieres eliminar este enlace?',
+                                  description: `Se eliminará el enlace ${link.campaign}_${link.period} (${link.subcampaign}).`,
+                                  onConfirm: async () => {
+                                    await DataEngine.deleteLink(link.id);
+                                    refreshLocalState();
+                                  },
+                                })
+                              }
+                              className="p-1.5 border border-ic-border bg-white text-ic-muted hover:text-ic-red"
+                              title="Eliminar enlace"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
@@ -1834,46 +1989,245 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 03: WHATSAPP Y HERRAMIENTAS AVANZADAS
-            (Configuración de Números WhatsApp + Generador QR + Simulador y Depurador)
+            MÓDULO CONFIGURACIÓN Y HERRAMIENTAS (Periodos, Asesores, WhatsApp, QR)
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-ic-border pb-5">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-widest text-ic-red mb-1">
-                  Módulo 03 • Configuración y Utilidades
-                </div>
-                <h1 className="text-3xl font-serif font-bold text-ic-dark">
-                  Números de WhatsApp, Códigos QR y Depurador de Pruebas
-                </h1>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setPurgeFeedback(null);
-                  setIsPurgeModalOpen(true);
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider"
-              >
-                <FilterX className="w-3.5 h-3.5" />
-                Abrir Depurador por Fechas
-              </button>
+            <div className="border-b border-ic-border pb-4 flex items-center justify-between">
+              <h1 className="text-2xl font-serif font-bold text-ic-dark">
+                Configuración de Periodos, Asesores y WhatsApp
+              </h1>
             </div>
 
-            {/* BLOQUE 1: CONFIGURACIÓN DE NÚMEROS DE WHATSAPP */}
-            <section className="bg-white border border-ic-border p-6 space-y-5">
-              <div className="flex items-center gap-2.5 border-b border-ic-border pb-3">
-                <Phone className="w-4 h-4 text-ic-red" />
-                <div>
-                  <h2 className="text-base font-serif font-bold text-ic-dark">
-                    1. Configuración de Números de WhatsApp del Instituto
-                  </h2>
-                  <p className="text-xs text-ic-muted">
-                    Administra aquí los teléfonos institucionales. Al editar un número, se actualiza para todos los enlaces que lo utilicen.
-                  </p>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* 1. GESTOR DE PERIODOS (ESTADO GLOBAL) */}
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-ic-red" />
+                    <h2 className="text-base font-serif font-bold text-ic-dark">
+                      1. Periodos (Estado Global)
+                    </h2>
+                  </div>
+                  <span className="text-xs font-mono text-ic-red font-bold">
+                    Activo: {activePeriod}
+                  </span>
                 </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setPeriodError(null);
+                    if (!isValidPeriodCode(newPeriodInput)) {
+                      setPeriodError('Usa el formato Año + 10, 20 o 30 (ej: 202610, 202720).');
+                      return;
+                    }
+                    try {
+                      await DataEngine.createPeriod(newPeriodInput, true);
+                      setNewPeriodInput('');
+                      refreshLocalState();
+                    } catch (err: unknown) {
+                      setPeriodError(err instanceof Error ? err.message : 'Error');
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={newPeriodInput}
+                    onChange={(e) => setNewPeriodInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ej: 202610 o 202720"
+                    className="flex-1 px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                  >
+                    Crear Periodo
+                  </button>
+                </form>
+
+                {periodError && (
+                  <div className="text-xs text-red-700 bg-red-50 p-2 border border-red-200">
+                    {periodError}
+                  </div>
+                )}
+
+                <div className="border border-ic-border divide-y divide-ic-border">
+                  {periods.map((p) => (
+                    <div
+                      key={p.code}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-mono font-bold text-sm text-ic-dark">
+                          {p.code}
+                        </span>
+                        {p.is_active && (
+                          <span className="px-2 py-0.5 bg-ic-red text-white text-[10px] font-semibold uppercase">
+                            Activo Global
+                          </span>
+                        )}
+                        <span className="text-[11px] text-ic-muted">
+                          ({p.usage_count} usos)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {!p.is_active && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await DataEngine.activatePeriod(p.code);
+                              refreshLocalState();
+                            }}
+                            className="px-2.5 py-1 border border-ic-border bg-white hover:bg-gray-100 text-[11px] font-medium"
+                          >
+                            Activar
+                          </button>
+                        )}
+
+                        {p.usage_count === 0 && !p.is_active ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmDelete({
+                                title: `¿Seguro que quieres eliminar el periodo ${p.code}?`,
+                                description:
+                                  'Este periodo no tiene enlaces ni conteos asociados.',
+                                onConfirm: async () => {
+                                  await DataEngine.deletePeriod(p.code);
+                                  refreshLocalState();
+                                },
+                              })
+                            }
+                            className="p-1 text-ic-muted hover:text-ic-red"
+                            title="Eliminar periodo sin uso"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span
+                            className="text-[10px] font-mono text-ic-muted px-1.5"
+                            title="En uso: limpia sus enlaces o métricas para poder eliminarlo"
+                          >
+                            En uso
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* 2. CONSTRUCTOR DE ASESOR / PROSPECTOR */}
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center gap-2 border-b border-ic-border pb-3">
+                  <UserCheck className="w-4 h-4 text-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    2. Asesores / Prospectores
+                  </h2>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!advisorNameInput.trim() || !advisorPhoneInput.trim()) return;
+                    await DataEngine.saveAdvisor({
+                      id: editingAdvisorId || undefined,
+                      name: advisorNameInput,
+                      phone_number: advisorPhoneInput,
+                    });
+                    setEditingAdvisorId(null);
+                    setAdvisorNameInput('');
+                    setAdvisorPhoneInput('');
+                    refreshLocalState();
+                  }}
+                  className="grid grid-cols-1 sm:grid-cols-3 gap-2"
+                >
+                  <input
+                    type="text"
+                    required
+                    value={advisorNameInput}
+                    onChange={(e) => setAdvisorNameInput(e.target.value)}
+                    placeholder="Nombre (Ej: Gerber)"
+                    className="px-3 py-2 text-xs border border-ic-border bg-white"
+                  />
+                  <input
+                    type="text"
+                    required
+                    value={advisorPhoneInput}
+                    onChange={(e) => setAdvisorPhoneInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Teléfono (519...)"
+                    className="px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                  >
+                    {editingAdvisorId ? 'Actualizar' : 'Agregar Asesor'}
+                  </button>
+                </form>
+
+                <div className="border border-ic-border divide-y divide-ic-border">
+                  {advisors.map((adv) => (
+                    <div
+                      key={adv.id}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <div>
+                        <div className="font-semibold text-ic-dark">
+                          {adv.name}{' '}
+                          <span className="font-mono text-ic-red">+{adv.phone_number}</span>
+                        </div>
+                        <div className="text-[11px] text-ic-muted truncate max-w-md">
+                          "Hola, {adv.name}, quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención [Campaña]_{activePeriod}"
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingAdvisorId(adv.id);
+                            setAdvisorNameInput(adv.name);
+                            setAdvisorPhoneInput(adv.phone_number);
+                          }}
+                          className="p-1 text-ic-muted hover:text-ic-dark"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: `¿Seguro que quieres eliminar al asesor ${adv.name}?`,
+                              description: 'Esta acción quitará al asesor de la lista.',
+                              onConfirm: async () => {
+                                await DataEngine.deleteAdvisor(adv.id);
+                                refreshLocalState();
+                              },
+                            })
+                          }
+                          className="p-1 text-ic-muted hover:text-ic-red"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            {/* 3. NÚMEROS DE WHATSAPP INSTITUCIONALES */}
+            <section className="bg-white border border-ic-border p-6 space-y-4">
+              <div className="flex items-center gap-2 border-b border-ic-border pb-3">
+                <Phone className="w-4 h-4 text-ic-red" />
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  3. Números de WhatsApp Institucionales
+                </h2>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1881,7 +2235,7 @@ export const App: React.FC = () => {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                        <th className="py-2.5 px-4">Etiqueta / Canal</th>
+                        <th className="py-2.5 px-4">Canal / Etiqueta</th>
                         <th className="py-2.5 px-4">Área</th>
                         <th className="py-2.5 px-4">Teléfono</th>
                         <th className="py-2.5 px-4 text-right">Acciones</th>
@@ -1890,33 +2244,37 @@ export const App: React.FC = () => {
                     <tbody className="divide-y divide-ic-border text-xs">
                       {waNumbers.map((w) => (
                         <tr key={w.id} className="hover:bg-gray-50">
-                          <td className="py-3 px-4 font-semibold text-ic-dark">{w.label}</td>
-                          <td className="py-3 px-4 text-ic-muted">{w.department}</td>
-                          <td className="py-3 px-4 font-mono font-bold text-ic-red">
+                          <td className="py-2.5 px-4 font-semibold text-ic-dark">{w.label}</td>
+                          <td className="py-2.5 px-4 text-ic-muted">{w.department}</td>
+                          <td className="py-2.5 px-4 font-mono font-bold text-ic-red">
                             +{w.phone_number}
                           </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="inline-flex items-center gap-1.5">
+                          <td className="py-2.5 px-4 text-right">
+                            <div className="inline-flex items-center gap-2">
                               <button
                                 onClick={() => {
                                   setEditingWaId(w.id);
                                   setWaLabelInput(w.label);
                                   setWaPhoneInput(w.phone_number);
                                   setWaDeptInput(w.department);
-                                  setWaGreetingInput(w.default_greeting);
                                 }}
-                                className="px-2 py-1 text-[11px] border border-ic-border bg-white hover:bg-gray-100 flex items-center gap-1"
+                                className="p-1 text-ic-muted hover:text-ic-dark"
                               >
-                                <Edit3 className="w-3 h-3" /> Editar
+                                <Edit3 className="w-3.5 h-3.5" />
                               </button>
                               {waNumbers.length > 1 && (
                                 <button
-                                  onClick={() => {
-                                    DataEngine.deleteWhatsAppNumber(w.id);
-                                    loadData();
-                                  }}
+                                  onClick={() =>
+                                    setConfirmDelete({
+                                      title: '¿Seguro que quieres eliminar este número de WhatsApp?',
+                                      description: `Se eliminará "${w.label}" (+${w.phone_number}) de forma permanente.`,
+                                      onConfirm: async () => {
+                                        await DataEngine.deleteWhatsAppNumber(w.id);
+                                        refreshLocalState();
+                                      },
+                                    })
+                                  }
                                   className="p-1 text-ic-muted hover:text-ic-red"
-                                  title="Eliminar número"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -1930,144 +2288,107 @@ export const App: React.FC = () => {
                 </div>
 
                 <form
-                  onSubmit={handleSaveWhatsAppNumber}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!waLabelInput.trim() || !waPhoneInput.trim()) return;
+                    await DataEngine.saveWhatsAppNumber({
+                      id: editingWaId || undefined,
+                      label: waLabelInput,
+                      phone_number: waPhoneInput,
+                      department: waDeptInput,
+                      default_greeting:
+                        'Hola, quisiera saber más sobre Instituto y Escuela Superior Continental.',
+                    });
+                    setEditingWaId(null);
+                    setWaLabelInput('');
+                    setWaPhoneInput('');
+                    refreshLocalState();
+                  }}
                   className="lg:col-span-5 bg-[#FAFAFA] border border-ic-border p-4 space-y-3"
                 >
                   <div className="text-xs font-serif font-bold text-ic-dark">
-                    {editingWaId ? 'Editar Número de WhatsApp' : 'Agregar Nuevo Número de WhatsApp'}
+                    {editingWaId ? 'Editar Número' : 'Nuevo Número de WhatsApp'}
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-ic-muted mb-1">
-                      Nombre Identificador *
-                    </label>
+                  <input
+                    type="text"
+                    required
+                    value={waLabelInput}
+                    onChange={(e) => setWaLabelInput(e.target.value)}
+                    placeholder="Etiqueta (Ej: WhatsApp Admisión)"
+                    className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
                     <input
                       type="text"
                       required
-                      value={waLabelInput}
-                      onChange={(e) => setWaLabelInput(e.target.value)}
-                      placeholder="Ej: WhatsApp Admisión Pregrado"
-                      className="w-full px-3 py-1.5 text-xs border border-ic-border bg-white"
+                      value={waPhoneInput}
+                      onChange={(e) => setWaPhoneInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="51987654321"
+                      className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                    />
+                    <input
+                      type="text"
+                      value={waDeptInput}
+                      onChange={(e) => setWaDeptInput(e.target.value)}
+                      placeholder="Área"
+                      className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] text-ic-muted mb-1">
-                        Teléfono (con 51) *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={waPhoneInput}
-                        onChange={(e) => setWaPhoneInput(e.target.value)}
-                        placeholder="51987654321"
-                        className="w-full px-3 py-1.5 text-xs font-mono border border-ic-border bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-ic-muted mb-1">Área</label>
-                      <input
-                        type="text"
-                        value={waDeptInput}
-                        onChange={(e) => setWaDeptInput(e.target.value)}
-                        placeholder="Admisión"
-                        className="w-full px-3 py-1.5 text-xs border border-ic-border bg-white"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="submit"
-                      className="flex-1 py-2 bg-ic-red hover:bg-ic-redHover text-white text-xs font-semibold uppercase tracking-wider"
-                    >
-                      {editingWaId ? 'Actualizar Número' : 'Guardar Número'}
-                    </button>
-                    {editingWaId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingWaId(null);
-                          setWaLabelInput('');
-                          setWaPhoneInput('');
-                        }}
-                        className="px-3 py-2 border border-ic-border bg-white text-xs"
-                      >
-                        Cancelar
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                  >
+                    {editingWaId ? 'Actualizar' : 'Guardar Número'}
+                  </button>
                 </form>
               </div>
             </section>
 
-            {/* BLOQUE 2 Y 3: GENERADOR DE CÓDIGOS QR + SIMULADOR DE TRÁFICO / ANTI-BOTS */}
+            {/* 4. QR Y SIMULADOR */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* Generador de Códigos QR */}
               <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <QrCode className="w-4 h-4 text-ic-red" />
-                  <div>
-                    <h2 className="text-base font-serif font-bold text-ic-dark">
-                      2. Generador de Código QR (SVG Vectorial y PNG)
-                    </h2>
-                    <p className="text-xs text-ic-muted">
-                      Descarga el QR de cualquiera de tus enlaces para piezas gráficas o afiches.
-                    </p>
-                  </div>
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    4. Código QR
+                  </h2>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                    Seleccionar Enlace
-                  </label>
-                  <select
-                    value={qrSelectedUrl}
-                    onChange={(e) => setQrSelectedUrl(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                  >
-                    {links.map((l) => {
-                      const u = `https://trace.icontinental.edu.pe/${l.slug}`;
-                      return (
-                        <option key={l.id} value={u}>
-                          /{l.slug} — {l.title}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
+                <select
+                  value={qrSelectedUrl}
+                  onChange={(e) => setQrSelectedUrl(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                >
+                  {links.map((l) => (
+                    <option key={l.id} value={l.normal_url}>
+                      {l.campaign}_{l.period} ({l.subcampaign})
+                    </option>
+                  ))}
+                </select>
 
-                <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-[#FAFAFA] border border-ic-border">
-                  <div className="bg-white p-3 border border-ic-border">
+                <div className="flex items-center gap-6 p-4 bg-[#FAFAFA] border border-ic-border">
+                  <div className="bg-white p-2 border border-ic-border">
                     {qrPngUrl && (
-                      <img src={qrPngUrl} alt="QR Trace IC" className="w-36 h-36 object-contain" />
+                      <img src={qrPngUrl} alt="QR" className="w-28 h-28 object-contain" />
                     )}
                   </div>
-
-                  <div className="flex-1 space-y-2.5 w-full">
-                    <div className="flex items-center gap-2">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => setQrColor('#111827')}
-                        className={`px-2.5 py-1 text-xs border ${
-                          qrColor === '#111827'
-                            ? 'bg-ic-dark text-white border-ic-dark'
-                            : 'bg-white text-ic-dark border-ic-border'
-                        }`}
+                        className="px-2.5 py-1 text-xs border border-ic-border bg-white"
                       >
                         Negro
                       </button>
                       <button
                         type="button"
                         onClick={() => setQrColor('#E4000B')}
-                        className={`px-2.5 py-1 text-xs border ${
-                          qrColor === '#E4000B'
-                            ? 'bg-ic-red text-white border-ic-red'
-                            : 'bg-white text-ic-dark border-ic-border'
-                        }`}
+                        className="px-2.5 py-1 text-xs border border-ic-red text-ic-red bg-white"
                       >
-                        Rojo IC (#E4000B)
+                        Rojo IC
                       </button>
                     </div>
-
                     <button
                       type="button"
                       onClick={() => {
@@ -2081,123 +2402,75 @@ export const App: React.FC = () => {
                         a.click();
                         URL.revokeObjectURL(u);
                       }}
-                      className="w-full py-2 px-3 bg-ic-red text-white text-xs font-medium flex items-center justify-center gap-1.5"
+                      className="w-full py-2 bg-ic-red text-white text-xs font-medium"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Descargar Vectorial SVG
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const a = document.createElement('a');
-                        a.href = qrPngUrl;
-                        a.download = 'QR-TraceIC.png';
-                        a.click();
-                      }}
-                      className="w-full py-2 px-3 bg-white border border-ic-border text-ic-dark text-xs font-medium flex items-center justify-center gap-1.5"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Descargar PNG (600px)
+                      Descargar SVG
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Probador de Clics y Depurador Rápido */}
               <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
-                <div className="flex items-center justify-between border-b border-ic-border pb-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-ic-red" />
-                    <div>
-                      <h2 className="text-base font-serif font-bold text-ic-dark">
-                        3. Simulador de Clics y Filtro Anti-Bots
-                      </h2>
-                      <p className="text-xs text-ic-muted">
-                        Los clics simulados se marcan automáticamente como depurables.
-                      </p>
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2 border-b border-ic-border pb-3">
+                  <ShieldCheck className="w-4 h-4 text-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    5. Simulador y Depurador de Pruebas
+                  </h2>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                      Subcampaña o Carrera a Probar
-                    </label>
-                    <select
-                      value={simRecordId}
-                      onChange={(e) => setSimRecordId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
-                    >
-                      {records.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          [{r.campaign}] {CHANNEL_LABELS[r.channel]} → {r.subcampaign}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <select
+                  value={simRecordId}
+                  onChange={(e) => setSimRecordId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
+                >
+                  {records.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      [{r.campaign}_{r.period}] {r.subcampaign}
+                    </option>
+                  ))}
+                </select>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                      Tipo de Acceso Simulado
-                    </label>
-                    <select
-                      value={simIsBot ? 'bot' : 'human'}
-                      onChange={(e) => setSimIsBot(e.target.value === 'bot')}
-                      className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
-                    >
-                      <option value="human">
-                        Persona Real (Suma +1 clic de prueba en la Reportería)
-                      </option>
-                      <option value="bot">
-                        Bot de Vista Previa de WhatsApp / Redes (Bloqueado por el filtro)
-                      </option>
-                    </select>
-                  </div>
+                <select
+                  value={simIsBot ? 'bot' : 'human'}
+                  onChange={(e) => setSimIsBot(e.target.value === 'bot')}
+                  className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
+                >
+                  <option value="human">Clic de Prueba (Humano)</option>
+                  <option value="bot">Vista Previa de Bot (Bloqueado)</option>
+                </select>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const res = DataEngine.simulateTestClick({
-                          recordId: simRecordId,
-                          isBot: simIsBot,
-                        });
-                        setSimFeedback(res.message);
-                        loadData();
-                      }}
-                      className="py-2.5 px-3 bg-ic-dark hover:bg-black text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                      Simular Clic
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPurgeFeedback(null);
-                        setIsPurgeModalOpen(true);
-                      }}
-                      className="py-2.5 px-3 bg-white hover:bg-ic-redSoft border border-ic-border text-ic-red text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2"
-                    >
-                      <FilterX className="w-3.5 h-3.5" />
-                      Depurar Pruebas
-                    </button>
-                  </div>
-
-                  {simFeedback && (
-                    <div
-                      className={`p-3 border text-xs ${
-                        simIsBot
-                          ? 'bg-amber-50 border-amber-200 text-amber-900'
-                          : 'bg-green-50 border-green-200 text-green-900'
-                      }`}
-                    >
-                      {simFeedback}
-                    </div>
-                  )}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await DataEngine.simulateTestClick({
+                        recordId: simRecordId,
+                        isBot: simIsBot,
+                      });
+                      setSimFeedback(res.message);
+                      refreshLocalState();
+                    }}
+                    className="py-2 bg-ic-dark text-white text-xs font-semibold uppercase flex items-center justify-center gap-1.5"
+                  >
+                    <Play className="w-3.5 h-3.5" /> Simular
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPurgeFeedback(null);
+                      setIsPurgeModalOpen(true);
+                    }}
+                    className="py-2 border border-ic-red text-ic-red text-xs font-semibold uppercase flex items-center justify-center gap-1.5"
+                  >
+                    <FilterX className="w-3.5 h-3.5" /> Depurar
+                  </button>
                 </div>
+
+                {simFeedback && (
+                  <div className="p-2.5 bg-gray-50 border border-ic-border text-xs">
+                    {simFeedback}
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -2,15 +2,8 @@
 declare(strict_types=1);
 
 /**
- * TRACE IC — Motor de Redirección y Conteo en Tiempo Real (< 20 ms)
- * Dominio: https://trace.icontinental.edu.pe/{slug}
- *
- * Soporta:
- * - Enlace normal de Mailing/SMS/Chattigo: /CRM?campana=202710&subcampana=...
- * - Enlace normal de Sitio Web: /whatsapp-web (autodetección de /carrera/diseno-de-modas/)
- * - Enlace normal de TikTok Ads: /tiktok?campana=202710&subcampana=...
- * - Enlace normal de Landing: /landing?campana=202710&subcampana=...
- * - Cualquier alias corto personalizado creado en el Generador de Enlaces.
+ * TRACE IC — Motor de Redirección y Construcción Automática de Código de Atención
+ * Dominio: https://trace.icontinental.edu.pe/{slug}?utm=...&campana=...&periodo=...
  */
 
 $configFile = __DIR__ . '/api/config.php';
@@ -73,15 +66,64 @@ function resolveWebsiteCareerOrSection(string $path): string
     return $careers[$lastSlug] ?? ucwords(str_replace(['-', '_'], ' ', $lastSlug));
 }
 
+function cleanCampaignCode(string $raw): string
+{
+    $noAccents = strtr($raw, [
+        'á' => 'A', 'é' => 'E', 'í' => 'I', 'ó' => 'O', 'ú' => 'U', 'ñ' => 'N',
+        'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N',
+    ]);
+    $upper = strtoupper(trim($noAccents));
+    $withUnderscore = preg_replace('/\s+/', '_', $upper);
+    $clean = preg_replace('/[^A-Z0-9_]/', '', (string) $withUnderscore);
+    $clean = preg_replace('/_+/', '_', (string) $clean);
+    return substr(trim((string) $clean, '_'), 0, 30) ?: 'PORTALWEB';
+}
+
 try {
     Database::init($config);
     $pdo = Database::getConnection();
 
+    // Resolver Periodo Global Activo
+    $activePeriod = '202710';
+    try {
+        $pRow = $pdo->query("SELECT code FROM periods WHERE is_active = 1 LIMIT 1")->fetchColumn();
+        if ($pRow) {
+            $activePeriod = (string) $pRow;
+        }
+    } catch (\Throwable $e) {
+        // Tabla periods aún no migrada
+    }
+
+    // Buscar ruta base o enlace registrado
     $stmt = $pdo->prepare('SELECT * FROM links WHERE LOWER(slug) = LOWER(:slug) LIMIT 1');
     $stmt->execute(['slug' => $slug]);
     $link = $stmt->fetch();
 
-    if (!$link || $link['status'] !== 'active') {
+    // Compatibilidad automática para /link-ads, /tiktok, /asesor, /CRM, /whatsapp-web
+    if (!$link) {
+        $lowerSlug = strtolower($slug);
+        if (in_array($lowerSlug, ['link-ads', 'tiktok', 'asesor', 'crm', 'whatsapp-web'], true)) {
+            $stmtFallback = $pdo->query('SELECT * FROM links ORDER BY is_master_route DESC, id ASC LIMIT 1');
+            $link = $stmtFallback->fetch();
+            if ($link) {
+                if ($lowerSlug === 'link-ads' || $lowerSlug === 'tiktok') {
+                    $link['channel'] = 'link_ads';
+                    $link['slug'] = 'link-ads';
+                } elseif ($lowerSlug === 'asesor') {
+                    $link['channel'] = 'asesor_prospector';
+                    $link['slug'] = 'asesor';
+                } elseif ($lowerSlug === 'crm') {
+                    $link['channel'] = 'mailing_sms_chattigo';
+                    $link['slug'] = 'CRM';
+                } else {
+                    $link['channel'] = 'web_institucional';
+                    $link['slug'] = 'whatsapp-web';
+                }
+            }
+        }
+    }
+
+    if (!$link || ($link['status'] ?? 'active') !== 'active') {
         header('Cache-Control: no-store, no-cache, must-revalidate');
         header('Location: ' . $fallbackUrl, true, 302);
         exit;
@@ -100,7 +142,7 @@ try {
     $secretSalt = $config['app']['secret_key'] ?? 'trace_ic_salt';
     $visitorHash = hash('sha256', $ip . '|' . $userAgent . '|' . $link['id'] . '|' . date('Y-m-d') . '|' . $secretSalt);
 
-    // Filtro silencioso de Bots (vistas previas de WhatsApp/Redes/Correo)
+    // Filtro silencioso de Bots
     $isBot = false;
     if ($method === 'HEAD' || $method === 'OPTIONS' || strlen($userAgent) < 12) {
         $isBot = true;
@@ -118,7 +160,7 @@ try {
         }
     }
 
-    // Detectar URL de origen cuando proviene del Sitio Web Institucional
+    // Detectar URL de origen del Sitio Web Institucional
     $refererFull = isset($_SERVER['HTTP_REFERER']) ? substr(trim($_SERVER['HTTP_REFERER']), 0, 500) : null;
     $sourcePath = null;
     $urlReference = null;
@@ -139,26 +181,33 @@ try {
         $urlReference = 'https://icontinental.edu.pe' . $sourcePath;
     }
 
+    $paramPeriod = trim($_GET['periodo'] ?? '');
     $paramCampaign = trim($_GET['campana'] ?? $_GET['c'] ?? '');
-    $paramSubcampaign = trim($_GET['subcampana'] ?? $_GET['s'] ?? '');
+    $paramUtm = trim($_GET['utm'] ?? $_GET['subcampana'] ?? $_GET['asesor'] ?? $_GET['s'] ?? '');
 
-    $finalCampaign = $paramCampaign !== '' ? $paramCampaign : ($link['campaign'] ?: '202710');
-    $finalSubcampaign = $paramSubcampaign !== '' ? $paramSubcampaign : ($link['subcampaign'] ?: 'General');
+    $finalPeriod = preg_match('/^20[2-3]\d(10|20|30)$/', $paramPeriod)
+        ? $paramPeriod
+        : (!empty($link['period']) ? (string) $link['period'] : $activePeriod);
+
+    $finalCampaign = $paramCampaign !== ''
+        ? cleanCampaignCode($paramCampaign)
+        : cleanCampaignCode((string) ($link['campaign'] ?: 'PORTALWEB'));
+
+    $finalSubcampaign = $paramUtm !== ''
+        ? $paramUtm
+        : ((string) ($link['subcampaign'] ?: 'general'));
 
     if ($sourcePath !== null && $link['channel'] === 'web_institucional') {
         $finalSubcampaign = resolveWebsiteCareerOrSection($sourcePath);
     }
 
-    // Verificar si existe una fila específica para esta combinación (ej. cuando se usa /CRM?campana=202710&subcampana=...)
-    $shortLinkDisplay = 'trace.icontinental.edu.pe/' . $link['slug'];
-    if ($paramCampaign !== '' || $paramSubcampaign !== '') {
-        $shortLinkDisplay = sprintf(
-            'trace.icontinental.edu.pe/%s?campana=%s&subcampana=%s',
-            $link['slug'],
-            rawurlencode($finalCampaign),
-            rawurlencode($finalSubcampaign)
-        );
-    }
+    $shortLinkDisplay = sprintf(
+        'trace.icontinental.edu.pe/%s?utm=%s&campana=%s&periodo=%s',
+        $link['slug'],
+        rawurlencode($finalSubcampaign),
+        rawurlencode($finalCampaign),
+        rawurlencode($finalPeriod)
+    );
 
     // Unicidad diaria y protección contra doble clic (< 3s)
     $isUnique = 0;
@@ -178,9 +227,37 @@ try {
         }
     }
 
-    if ($link['destination_type'] === 'whatsapp') {
-        $phone = preg_replace('/\D/', '', $link['whatsapp_phone'] ?: '51987654321');
-        $message = $link['whatsapp_message'] ?: 'Hola Instituto Continental, deseo recibir información.';
+    // Construir teléfono y mensaje de WhatsApp con Código de Atención automático
+    $phone = preg_replace('/\D/', '', (string) ($link['whatsapp_phone'] ?: '51987654321'));
+    $attentionCode = $finalCampaign . '_' . $finalPeriod;
+
+    if ($link['channel'] === 'asesor_prospector') {
+        $advisorName = $finalSubcampaign ?: 'Asesor';
+        try {
+            $advStmt = $pdo->prepare('SELECT name, phone_number FROM advisors WHERE LOWER(name) = LOWER(:n) LIMIT 1');
+            $advStmt->execute(['n' => $advisorName]);
+            $advRow = $advStmt->fetch();
+            if ($advRow) {
+                $advisorName = (string) $advRow['name'];
+                $phone = preg_replace('/\D/', '', (string) $advRow['phone_number']);
+            }
+        } catch (\Throwable $e) {
+            // Ignorar si no existe
+        }
+        $message = "Hola, {$advisorName}, quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención {$attentionCode}";
+    } elseif ($link['channel'] === 'web_institucional') {
+        if ($urlReference && $sourcePath && $sourcePath !== '/') {
+            $message = "Hola, vengo de {$urlReference} y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención {$attentionCode}";
+        } else {
+            $message = "Hola, vengo del portal web y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención {$attentionCode}";
+        }
+    } else {
+        $originTag = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', $finalSubcampaign));
+        $fullCode = $originTag !== '' ? "{$attentionCode}_{$originTag}" : $attentionCode;
+        $message = "Hola, vengo de {$finalSubcampaign} y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención {$fullCode}";
+    }
+
+    if (($link['destination_type'] ?? 'whatsapp') === 'whatsapp') {
         $finalDestinationUrl = 'https://api.whatsapp.com/send?phone=' . rawurlencode($phone) . '&text=' . rawurlencode($message);
     } else {
         $finalDestinationUrl = $link['destination_url'] ?: $fallbackUrl;
@@ -192,10 +269,10 @@ try {
         $insertStmt = $pdo->prepare("
             INSERT INTO click_events (
                 link_id, clicked_at, clicked_date, is_bot, is_unique, visitor_hash,
-                channel, campaign, subcampaign, url_reference, short_link, is_purgeable
+                channel, period, campaign, subcampaign, url_reference, short_link, is_purgeable
             ) VALUES (
                 :link_id, NOW(), CURRENT_DATE, :is_bot, :is_unique, :visitor_hash,
-                :channel, :campaign, :subcampaign, :url_reference, :short_link, :is_purgeable
+                :channel, :period, :campaign, :subcampaign, :url_reference, :short_link, :is_purgeable
             )
         ");
         $insertStmt->execute([
@@ -204,6 +281,7 @@ try {
             'is_unique'     => $isUnique,
             'visitor_hash'  => $visitorHash,
             'channel'       => $link['channel'],
+            'period'        => $finalPeriod,
             'campaign'      => $finalCampaign,
             'subcampaign'   => $finalSubcampaign,
             'url_reference' => $urlReference,
@@ -211,7 +289,6 @@ try {
             'is_purgeable'  => $isPurgeableEvent,
         ]);
     } catch (\Throwable $colErr) {
-        // Fallback por si aún no se ejecutó la auto-migración de is_purgeable
         $insertStmt = $pdo->prepare("
             INSERT INTO click_events (
                 link_id, clicked_at, clicked_date, is_bot, is_unique, visitor_hash,
