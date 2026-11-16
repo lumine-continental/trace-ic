@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowLeft,
   BarChart3,
+  BookOpen,
   Calendar,
   Check,
   ChevronDown,
-  ChevronRight,
   Copy,
   Download,
   Edit3,
+  ExternalLink,
   FilterX,
   FlaskConical,
   Link2,
@@ -31,6 +31,7 @@ import {
 import {
   AdvisorItem,
   buildDefaultWhatsAppMessage,
+  CareerItem,
   CHANNEL_LABELS,
   ChannelKey,
   CRM_ORIGINS,
@@ -77,7 +78,7 @@ const DATE_PRESET_LABELS: Record<DatePreset, string> = {
   all: 'Todo el historial',
 };
 
-const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v2';
+const AUTH_STORAGE_KEY = 'trace_ic_auth_session_v3';
 
 function formatShortDateEs(isoDate: string): string {
   if (!isoDate) return '';
@@ -103,7 +104,53 @@ function formatShortDateEs(isoDate: string): string {
   return `${d} ${months[mIdx]} ${y}`;
 }
 
+/**
+ * Componente reutilizable de Gráfico de Barras Minimalista Sencillo
+ */
+const MinimalBarChart: React.FC<{
+  title: string;
+  items: { label: string; sublabel?: string; clicks: number; unique: number }[];
+}> = ({ title, items }) => {
+  const maxClicks = Math.max(1, ...items.map((i) => i.clicks));
+  if (items.length === 0) return null;
+
+  return (
+    <div className="p-5 bg-[#FAFAFA] border-t border-ic-border space-y-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
+        {title}
+      </div>
+      <div className="space-y-2.5">
+        {items.map((item) => {
+          const widthPct = Math.max(2, Math.round((item.clicks / maxClicks) * 100));
+          return (
+            <div key={item.label} className="grid grid-cols-12 items-center gap-3 text-xs">
+              <div className="col-span-4 sm:col-span-3 truncate font-medium text-ic-dark">
+                {item.label}
+                {item.sublabel && (
+                  <span className="ml-1.5 text-[10px] font-mono text-ic-muted">
+                    ({item.sublabel})
+                  </span>
+                )}
+              </div>
+              <div className="col-span-6 sm:col-span-7 bg-gray-200/80 h-2.5 overflow-hidden">
+                <div
+                  className="h-full bg-ic-red transition-all duration-300"
+                  style={{ width: `${widthPct}%` }}
+                />
+              </div>
+              <div className="col-span-2 text-right font-mono font-bold text-ic-dark tabular-nums">
+                {item.clicks.toLocaleString()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const App: React.FC = () => {
+  // Toda la aplicación está protegida por Login
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
       return localStorage.getItem(AUTH_STORAGE_KEY) === '1';
@@ -122,6 +169,7 @@ export const App: React.FC = () => {
   const [periods, setPeriods] = useState<PeriodItem[]>([]);
   const [activePeriod, setActivePeriod] = useState<string>('202710');
   const [campaigns, setCampaigns] = useState<string[]>([]);
+  const [careers, setCareers] = useState<CareerItem[]>([]);
   const [advisors, setAdvisors] = useState<AdvisorItem[]>([]);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [records, setRecords] = useState<SubcampaignRecord[]>([]);
@@ -133,7 +181,6 @@ export const App: React.FC = () => {
   const [datePreset, setDatePreset] = useState<DatePreset>('this_month');
   const [startDate, setStartDate] = useState<string>('2026-11-01');
   const [endDate, setEndDate] = useState<string>('2026-11-30');
-  // Estados temporales dentro del dropdown antes de pulsar "Aplicar"
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
   const [tempPreset, setTempPreset] = useState<DatePreset>('this_month');
   const [tempStart, setTempStart] = useState<string>('2026-11-01');
@@ -141,8 +188,7 @@ export const App: React.FC = () => {
   const dateDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('all');
-  const [selectedChannelFilter, setSelectedChannelFilter] = useState<ChannelKey | 'all'>('all');
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [highlightedChannel, setHighlightedChannel] = useState<ChannelKey | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ===========================================================================
@@ -170,19 +216,18 @@ export const App: React.FC = () => {
   const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // GENERADOR DE ENLACES (Sin alias cortos manuales — el sistema genera con utm=)
+  // GENERADOR DE ENLACES (Periodo solo informativo, con Campaña y Carrera)
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
   const [genCampaignMode, setGenCampaignMode] = useState<'select' | 'new'>('select');
   const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('ADMISION_PREGRADO');
   const [genNewCampaignInput, setGenNewCampaignInput] = useState<string>('');
-  const [genPeriod, setGenPeriod] = useState<string>('202710');
+  const [genCareer, setGenCareer] = useState<string>('Diseño de Modas');
 
-  // Escenarios según canal
+  // Sub-escenarios
   const [genLinkAdsUtm, setGenLinkAdsUtm] = useState<string>('tiktok-ads');
   const [genCrmOrigin, setGenCrmOrigin] = useState<string>('chattigo');
   const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
-  const [genPortalSubsite, setGenPortalSubsite] = useState<string>('');
 
   const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
   const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
@@ -190,10 +235,12 @@ export const App: React.FC = () => {
   const [linkSearch, setLinkSearch] = useState<string>('');
 
   // ===========================================================================
-  // CONFIGURACIÓN: PERIODOS, ASESORES, WHATSAPP, QR Y SIMULADOR
+  // CONFIGURACIÓN: PERIODOS, CARRERAS, ASESORES, WHATSAPP, QR Y SIMULADOR
   // ===========================================================================
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [periodError, setPeriodError] = useState<string | null>(null);
+
+  const [newCareerInput, setNewCareerInput] = useState<string>('');
 
   const [editingAdvisorId, setEditingAdvisorId] = useState<number | null>(null);
   const [advisorNameInput, setAdvisorNameInput] = useState<string>('');
@@ -204,9 +251,7 @@ export const App: React.FC = () => {
   const [waPhoneInput, setWaPhoneInput] = useState('');
   const [waDeptInput, setWaDeptInput] = useState('Admisión');
 
-  const [qrSelectedUrl, setQrSelectedUrl] = useState<string>(
-    'https://trace.icontinental.edu.pe/whatsapp-web?utm=portal-web&campana=PORTALWEB&periodo=202710'
-  );
+  const [qrSelectedUrl, setQrSelectedUrl] = useState<string>('');
   const [qrColor, setQrColor] = useState<'#111827' | '#E4000B'>('#111827');
   const [qrPngUrl, setQrPngUrl] = useState<string>('');
   const [qrSvgText, setQrSvgText] = useState<string>('');
@@ -223,9 +268,7 @@ export const App: React.FC = () => {
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
     const todayStr = fmt(now);
 
-    if (preset === 'today') {
-      return { start: todayStr, end: todayStr };
-    }
+    if (preset === 'today') return { start: todayStr, end: todayStr };
     if (preset === 'yesterday') {
       const y = new Date(now);
       y.setDate(y.getDate() - 1);
@@ -289,6 +332,7 @@ export const App: React.FC = () => {
     const loadedPeriods = DataEngine.getPeriods();
     const currentActivePeriod = DataEngine.getActivePeriod();
     const loadedCampaigns = DataEngine.getCampaigns();
+    const loadedCareers = DataEngine.getCareers();
     const loadedAdvisors = DataEngine.getAdvisors();
     const loadedLinks = DataEngine.getLinks();
     const loadedRecords = DataEngine.getRecords();
@@ -296,15 +340,21 @@ export const App: React.FC = () => {
 
     setPeriods(loadedPeriods);
     setActivePeriod(currentActivePeriod);
-    setGenPeriod(currentActivePeriod);
     setCampaigns(loadedCampaigns);
+    setCareers(loadedCareers);
     setAdvisors(loadedAdvisors);
     setLinks(loadedLinks);
     setRecords(loadedRecords);
     setWaNumbers(loadedWa);
 
+    if (loadedCareers.length > 0 && !loadedCareers.some((c) => c.name === genCareer)) {
+      setGenCareer(loadedCareers[0].name);
+    }
     if (loadedAdvisors.length > 0 && !loadedAdvisors.some((a) => a.name === genAdvisorName)) {
       setGenAdvisorName(loadedAdvisors[0].name);
+    }
+    if (loadedLinks.length > 0 && !qrSelectedUrl) {
+      setQrSelectedUrl(loadedLinks[0].normal_url);
     }
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
       setSimRecordId(loadedRecords[0].id);
@@ -313,12 +363,6 @@ export const App: React.FC = () => {
       const firstTest = loadedRecords.find((r) => isTestRecord(r));
       setPurgeTargetId(firstTest ? firstTest.id : loadedRecords[0].id);
     }
-
-    const exp: Record<string, boolean> = {};
-    loadedRecords.forEach((r) => {
-      exp[`${r.channel}::${r.period}`] = true;
-    });
-    setExpandedGroups((prev) => ({ ...exp, ...prev }));
   };
 
   const loadData = () => {
@@ -383,9 +427,6 @@ export const App: React.FC = () => {
     } catch {
       // ignore
     }
-    if (activeModule === 'generator') {
-      setActiveModule('reports');
-    }
   };
 
   const copyToClipboard = (text: string, key: string) => {
@@ -394,8 +435,16 @@ export const App: React.FC = () => {
     setTimeout(() => setCopiedKey(null), 1800);
   };
 
+  const scrollToChannelSection = (ch: ChannelKey) => {
+    setHighlightedChannel(ch);
+    const el = document.getElementById(`desglose-canal-${ch}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   // ===========================================================================
-  // CÁLCULO AUTOMÁTICO DE CAMPAÑA, UTM, TELÉFONO, MENSAJE Y ENLACE EN GENERADOR
+  // CÁLCULO AUTOMÁTICO EN GENERADOR (Con Periodo Activo Global Fijo)
   // ===========================================================================
   const effectiveCampaign = useMemo(() => {
     const raw =
@@ -407,15 +456,8 @@ export const App: React.FC = () => {
     if (genChannel === 'link_ads') return genLinkAdsUtm;
     if (genChannel === 'mailing_sms_chattigo') return genCrmOrigin;
     if (genChannel === 'asesor_prospector') return genAdvisorName || 'Gerber';
-    if (genPortalSubsite.trim()) {
-      const clean = genPortalSubsite
-        .trim()
-        .replace(/^https?:\/\/(www\.)?icontinental\.edu\.pe\/?/i, '')
-        .replace(/\/$/, '');
-      return clean || 'portal-web';
-    }
-    return 'portal-web';
-  }, [genChannel, genLinkAdsUtm, genCrmOrigin, genAdvisorName, genPortalSubsite]);
+    return 'Portal Web';
+  }, [genChannel, genLinkAdsUtm, genCrmOrigin, genAdvisorName]);
 
   const effectivePhone = useMemo(() => {
     if (genChannel === 'asesor_prospector') {
@@ -429,27 +471,30 @@ export const App: React.FC = () => {
     return buildDefaultWhatsAppMessage({
       channel: genChannel,
       campaign: effectiveCampaign,
-      period: genPeriod || activePeriod,
+      career: genCareer,
+      period: activePeriod,
       utmSource: effectiveUtm,
       advisorName: genAdvisorName,
-      detectedUrl:
-        genChannel === 'web_institucional' && genPortalSubsite.trim()
-          ? genPortalSubsite.trim()
-          : undefined,
     });
-  }, [genChannel, effectiveCampaign, genPeriod, activePeriod, effectiveUtm, genAdvisorName, genPortalSubsite]);
+  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm, genAdvisorName]);
 
   const generatedSystemUrl = useMemo(() => {
     return buildSystemTrackingUrl({
       channel: genChannel,
       campaign: effectiveCampaign,
-      period: genPeriod || activePeriod,
+      career: genCareer,
+      period: activePeriod,
       utmSource: effectiveUtm,
     });
-  }, [genChannel, effectiveCampaign, genPeriod, activePeriod, effectiveUtm]);
+  }, [genChannel, effectiveCampaign, genCareer, activePeriod, effectiveUtm]);
+
+  const directWhatsAppPreviewUrl = useMemo(() => {
+    const cleanPhone = effectivePhone.replace(/\D/g, '') || '51987654321';
+    return `https://api.whatsapp.com/send?phone=${encodeURIComponent(cleanPhone)}&text=${encodeURIComponent(effectiveWaMessage)}`;
+  }, [effectivePhone, effectiveWaMessage]);
 
   // ===========================================================================
-  // FILTRADO DE REPORTERÍA (Por Fecha y por Periodo)
+  // AGREGACIONES PARA LAS 6 TABLAS DE REPORTERÍA
   // ===========================================================================
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
@@ -465,6 +510,7 @@ export const App: React.FC = () => {
     return records.filter((r) => isTestRecord(r)).length;
   }, [records]);
 
+  // 1. Conteo General por Canal
   const channelTotals = useMemo(() => {
     const map: Record<ChannelKey, { clicks: number; unique: number }> = {
       web_institucional: { clicks: 0, unique: 0 },
@@ -480,129 +526,236 @@ export const App: React.FC = () => {
     });
     const grandTotalClicks = Object.values(map).reduce((acc, v) => acc + v.clicks, 0);
     const grandTotalUnique = Object.values(map).reduce((acc, v) => acc + v.unique, 0);
-    return { byChannel: map, grandTotalClicks, grandTotalUnique };
+    const chartItems = (Object.keys(CHANNEL_LABELS) as ChannelKey[]).map((ch) => ({
+      label: CHANNEL_LABELS[ch],
+      clicks: map[ch].clicks,
+      unique: map[ch].unique,
+    }));
+    return { byChannel: map, grandTotalClicks, grandTotalUnique, chartItems };
   }, [filteredRecords]);
 
-  // NUEVO BLOQUE EN MÓDULO 01: "Resultados por Campaña"
-  const resultsByCampaign = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        campaign: string;
-        period: string;
-        attentionCode: string;
-        clicks: number;
-        unique: number;
-        channels: Set<string>;
-      }
-    >();
-
-    filteredRecords.forEach((r) => {
-      const code = `${r.campaign}_${r.period}`;
-      const current = map.get(code) || {
-        campaign: r.campaign,
-        period: r.period,
-        attentionCode: code,
-        clicks: 0,
-        unique: 0,
-        channels: new Set<string>(),
-      };
-      current.clicks += r.clicks;
-      current.unique += r.unique_visitors;
-      current.channels.add(CHANNEL_LABELS[r.channel]);
-      map.set(code, current);
-    });
-
-    return Array.from(map.values())
-      .map((item) => ({
-        ...item,
-        channelsList: Array.from(item.channels),
-      }))
-      .sort((a, b) => b.clicks - a.clicks);
-  }, [filteredRecords]);
-
-  const hierarchicalReport = useMemo(() => {
+  // 2. Desglose por Canal (Siempre imprime los 4 canales completos)
+  const breakdownByChannel = useMemo(() => {
     const channelsOrder: ChannelKey[] = [
       'web_institucional',
       'link_ads',
       'mailing_sms_chattigo',
       'asesor_prospector',
     ];
-
-    return channelsOrder
-      .filter((ch) => selectedChannelFilter === 'all' || ch === selectedChannelFilter)
-      .map((ch) => {
-        const chRecords = filteredRecords.filter((r) => r.channel === ch);
-        const periodsMap = new Map<
-          string,
-          {
-            period: string;
-            clicks: number;
-            unique: number;
-            subcampaigns: SubcampaignRecord[];
+    return channelsOrder.map((ch) => {
+      const rows = filteredRecords
+        .filter((r) => r.channel === ch)
+        .sort((a, b) => {
+          if (ch === 'asesor_prospector') {
+            const advCmp = (a.advisor_name || a.subcampaign).localeCompare(
+              b.advisor_name || b.subcampaign
+            );
+            if (advCmp !== 0) return advCmp;
           }
-        >();
-
-        chRecords.forEach((rec) => {
-          const current = periodsMap.get(rec.period) || {
-            period: rec.period,
-            clicks: 0,
-            unique: 0,
-            subcampaigns: [],
-          };
-          current.clicks += rec.clicks;
-          current.unique += rec.unique_visitors;
-          current.subcampaigns.push(rec);
-          periodsMap.set(rec.period, current);
+          return b.clicks - a.clicks;
         });
-
-        const periodsList = Array.from(periodsMap.values()).map((p) => ({
-          ...p,
-          subcampaigns: p.subcampaigns.sort((a, b) => b.clicks - a.clicks),
-        }));
-
-        const totalClicks = periodsList.reduce((s, p) => s + p.clicks, 0);
-        const totalUnique = periodsList.reduce((s, p) => s + p.unique, 0);
-
-        return {
-          channel: ch,
-          channelLabel: CHANNEL_LABELS[ch],
-          totalClicks,
-          totalUnique,
-          periods: periodsList.sort((a, b) => b.clicks - a.clicks),
-        };
-      });
-  }, [filteredRecords, selectedChannelFilter]);
-
-  const websiteCareersRanking = useMemo(() => {
-    return filteredRecords
-      .filter(
-        (r) =>
-          r.channel === 'web_institucional' &&
-          r.url_reference?.includes('/carrera/')
-      )
-      .sort((a, b) => b.clicks - a.clicks);
+      const totalClicks = rows.reduce((s, r) => s + r.clicks, 0);
+      const totalUnique = rows.reduce((s, r) => s + r.unique_visitors, 0);
+      return {
+        channel: ch,
+        channelLabel: CHANNEL_LABELS[ch],
+        totalClicks,
+        totalUnique,
+        rows,
+      };
+    });
   }, [filteredRecords]);
+
+  // 3. Resultados por Campaña
+  const resultsByCampaign = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        channelLabel: string;
+        campaign: string;
+        career: string;
+        period: string;
+        code: string;
+        clicks: number;
+        unique: number;
+      }
+    >();
+
+    filteredRecords.forEach((r) => {
+      const code = `${r.campaign}_${r.period}`;
+      const existing = map.get(code);
+      if (!existing) {
+        map.set(code, {
+          key: code,
+          channelLabel: CHANNEL_LABELS[r.channel],
+          campaign: r.campaign,
+          career: r.career,
+          period: r.period,
+          code,
+          clicks: r.clicks,
+          unique: r.unique_visitors,
+        });
+      } else {
+        existing.clicks += r.clicks;
+        existing.unique += r.unique_visitors;
+        if (!existing.channelLabel.includes(CHANNEL_LABELS[r.channel])) {
+          existing.channelLabel += `, ${CHANNEL_LABELS[r.channel]}`;
+        }
+        if (!existing.career.includes(r.career)) {
+          existing.career += `, ${r.career}`;
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
+  }, [filteredRecords]);
+
+  // 4. Resultados por Carrera
+  const resultsByCareer = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        career: string;
+        channelLabel: string;
+        campaign: string;
+        period: string;
+        code: string;
+        clicks: number;
+        unique: number;
+      }
+    >();
+
+    filteredRecords.forEach((r) => {
+      const key = `${r.career}::${r.period}`;
+      const code = `${r.campaign}_${r.period}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          career: r.career,
+          channelLabel: CHANNEL_LABELS[r.channel],
+          campaign: r.campaign,
+          period: r.period,
+          code,
+          clicks: r.clicks,
+          unique: r.unique_visitors,
+        });
+      } else {
+        existing.clicks += r.clicks;
+        existing.unique += r.unique_visitors;
+        if (!existing.channelLabel.includes(CHANNEL_LABELS[r.channel])) {
+          existing.channelLabel += `, ${CHANNEL_LABELS[r.channel]}`;
+        }
+        if (!existing.campaign.includes(r.campaign)) {
+          existing.campaign += `, ${r.campaign}`;
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
+  }, [filteredRecords]);
+
+  // 5. Resultado por Número de WhatsApp
+  const resultsByWhatsApp = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        phone: string;
+        label: string;
+        clicks: number;
+        unique: number;
+      }
+    >();
+
+    filteredRecords.forEach((r) => {
+      const phone = r.whatsapp_phone || '51987654321';
+      const foundWa = waNumbers.find((w) => w.phone_number === phone);
+      const foundAdv = advisors.find((a) => a.phone_number === phone);
+      const label = foundWa
+        ? foundWa.label
+        : foundAdv
+        ? `Asesor ${foundAdv.name}`
+        : 'WhatsApp Institucional';
+
+      const existing = map.get(phone) || {
+        phone,
+        label,
+        clicks: 0,
+        unique: 0,
+      };
+      existing.clicks += r.clicks;
+      existing.unique += r.unique_visitors;
+      map.set(phone, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
+  }, [filteredRecords, waNumbers, advisors]);
+
+  // 6. Resultado por Periodo
+  const resultsByPeriod = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        period: string;
+        isActive: boolean;
+        campaignsCount: Set<string>;
+        careersCount: Set<string>;
+        clicks: number;
+        unique: number;
+      }
+    >();
+
+    periods.forEach((p) => {
+      map.set(p.code, {
+        period: p.code,
+        isActive: p.is_active,
+        campaignsCount: new Set<string>(),
+        careersCount: new Set<string>(),
+        clicks: 0,
+        unique: 0,
+      });
+    });
+
+    filteredRecords.forEach((r) => {
+      const existing = map.get(r.period) || {
+        period: r.period,
+        isActive: r.period === activePeriod,
+        campaignsCount: new Set<string>(),
+        careersCount: new Set<string>(),
+        clicks: 0,
+        unique: 0,
+      };
+      existing.clicks += r.clicks;
+      existing.unique += r.unique_visitors;
+      existing.campaignsCount.add(r.campaign);
+      existing.careersCount.add(r.career);
+      map.set(r.period, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.period.localeCompare(a.period));
+  }, [filteredRecords, periods, activePeriod]);
 
   const handleExportReportCsv = () => {
     const headers = [
       'Canal',
-      'Periodo',
       'Campana',
-      'Codigo_Atencion',
-      'UTM_o_Asesor_o_Carrera',
-      'Enlace',
+      'Carrera',
+      'Periodo',
+      'Codigo',
+      'Suborigen_o_Asesor',
+      'Telefono_WhatsApp',
       'Clics_Totales',
       'Personas_Unicas',
       'Fecha_Actividad',
     ];
     const rows = filteredRecords.map((r) => [
       `"${CHANNEL_LABELS[r.channel]}"`,
-      `"${r.period}"`,
       `"${r.campaign}"`,
+      `"${r.career.replace(/"/g, '""')}"`,
+      `"${r.period}"`,
       `"${r.campaign}_${r.period}"`,
       `"${r.subcampaign.replace(/"/g, '""')}"`,
-      `"${r.url_reference || `https://${r.short_link}`}"`,
+      `"${r.whatsapp_phone}"`,
       r.clicks,
       r.unique_visitors,
       r.last_activity_date,
@@ -623,16 +776,17 @@ export const App: React.FC = () => {
     try {
       const created = await DataEngine.createLink({
         channel: genChannel,
-        period: genPeriod || activePeriod,
+        period: activePeriod, // Siempre usa el Periodo Global Activo
         campaign: effectiveCampaign,
+        career: genCareer,
         subcampaign: effectiveUtm,
         advisor_name: genChannel === 'asesor_prospector' ? genAdvisorName : undefined,
-        destination_type: 'whatsapp',
         whatsapp_phone: effectivePhone,
         whatsapp_message: effectiveWaMessage,
         is_purgeable: genIsPurgeable,
       });
       setGenFeedbackUrl(created.normal_url);
+      copyToClipboard(created.normal_url, 'gen-preview');
       if (genCampaignMode === 'new') {
         setGenSelectedCampaign(effectiveCampaign);
         setGenCampaignMode('select');
@@ -661,9 +815,9 @@ export const App: React.FC = () => {
   };
 
   // ===========================================================================
-  // LOGIN SPLIT-SCREEN MINIMALISTA (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
+  // LOGIN PROTEGIENDO TODA LA APP (50% IMAGEN IZQUIERDA / 50% LOGIN DERECHA)
   // ===========================================================================
-  if (activeModule === 'generator' && !isAuthenticated) {
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen w-full flex bg-white text-ic-dark">
         {/* MITAD IZQUIERDA (50%): Imagen Limpia a Pantalla Completa */}
@@ -692,16 +846,7 @@ export const App: React.FC = () => {
 
         {/* MITAD DERECHA (50%): Login Centrado y Minimalista */}
         <div className="w-full lg:w-1/2 flex flex-col justify-between p-8 sm:p-14 bg-white">
-          <div>
-            <button
-              type="button"
-              onClick={() => setActiveModule('reports')}
-              className="inline-flex items-center gap-2 text-xs font-semibold text-ic-muted hover:text-ic-dark"
-            >
-              <ArrowLeft className="w-4 h-4 text-ic-red" />
-              Volver a Reportería
-            </button>
-          </div>
+          <div />
 
           <div className="w-full max-w-sm mx-auto my-auto space-y-6">
             <div className="space-y-1">
@@ -710,7 +855,7 @@ export const App: React.FC = () => {
                 Iniciar Sesión
               </h1>
               <p className="text-xs text-ic-muted">
-                Generador de Enlaces • Trace IC
+                Plataforma Trace IC
               </p>
             </div>
 
@@ -774,11 +919,11 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-ic-dark flex flex-col">
       {/* =====================================================================
-          CABECERA SUPERIOR (Sin Generador en el menú central; botón a la derecha)
+          CABECERA SUPERIOR
          ===================================================================== */}
       <header className="bg-white border-b border-ic-border sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Izquierda: Marca + Navegación Pública */}
+          {/* Izquierda: Marca + Navegación Central */}
           <div className="flex items-center gap-8 h-full">
             <div className="flex items-center gap-3">
               <div className="w-1.5 h-7 bg-ic-red" />
@@ -851,15 +996,13 @@ export const App: React.FC = () => {
               <span>Generador de Enlaces</span>
             </button>
 
-            {isAuthenticated && (
-              <button
-                onClick={handleLogout}
-                className="p-2 text-ic-muted hover:text-ic-red border border-ic-border bg-white"
-                title="Cerrar sesión"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            )}
+            <button
+              onClick={handleLogout}
+              className="p-2 text-ic-muted hover:text-ic-red border border-ic-border bg-white"
+              title="Cerrar sesión"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </header>
@@ -1009,7 +1152,7 @@ export const App: React.FC = () => {
                       >
                         {records.map((r) => (
                           <option key={r.id} value={r.id}>
-                            [{r.campaign}_{r.period}] {r.subcampaign} ({r.clicks} clics)
+                            [{r.campaign}_{r.period}] {r.career} ({r.clicks} clics)
                           </option>
                         ))}
                       </select>
@@ -1058,22 +1201,20 @@ export const App: React.FC = () => {
       {/* =====================================================================
           CONTENIDO PRINCIPAL
          ===================================================================== */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-10">
         {/* ===================================================================
-            MÓDULO 01: REPORTERÍA
+            MÓDULO 01: REPORTERÍA (LAS 6 SECCIONES EN EL ORDEN SOLICITADO)
            =================================================================== */}
         {activeModule === 'reports' && (
           <>
             {/* Barra Superior: Título + Filtro de Fecha en 1 solo botón con Dropdown + Periodo + Acciones */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-ic-border pb-5">
-              <div>
-                <h1 className="text-2xl font-serif font-bold text-ic-dark">
-                  Reportería de Enlaces y Campañas
-                </h1>
-              </div>
+              <h1 className="text-2xl font-serif font-bold text-ic-dark">
+                Reportería
+              </h1>
 
               <div className="flex flex-wrap items-center gap-2.5">
-                {/* 1 SOLO BOTÓN DE FILTRO DE FECHA CON DROPDOWN (Estilo Google Analytics/Ads) */}
+                {/* 1 SOLO BOTÓN DE FILTRO DE FECHA CON DROPDOWN */}
                 <div className="relative" ref={dateDropdownRef}>
                   <button
                     type="button"
@@ -1097,7 +1238,6 @@ export const App: React.FC = () => {
 
                   {isDateDropdownOpen && (
                     <div className="absolute right-0 mt-1 z-50 bg-white border border-ic-border shadow-2xl w-[340px] sm:w-[540px] flex flex-col sm:flex-row">
-                      {/* Columna Izquierda: Lista de Opciones */}
                       <div className="sm:w-52 border-b sm:border-b-0 sm:border-r border-ic-border py-1.5 max-h-80 overflow-y-auto">
                         {(Object.keys(DATE_PRESET_LABELS) as DatePreset[]).map((key) => (
                           <button
@@ -1122,13 +1262,8 @@ export const App: React.FC = () => {
                         ))}
                       </div>
 
-                      {/* Columna Derecha: Rango de Fechas + Botones Cancelar / Aplicar */}
                       <div className="flex-1 p-5 flex flex-col justify-between space-y-5">
                         <div className="space-y-4">
-                          <div className="text-xs font-serif font-bold text-ic-dark">
-                            Rango de Fechas Seleccionado
-                          </div>
-
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="block text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
@@ -1162,7 +1297,6 @@ export const App: React.FC = () => {
                           </div>
 
                           <div className="p-3 bg-[#FAFAFA] border border-ic-border text-xs text-ic-muted">
-                            Periodo seleccionado:{' '}
                             <strong className="text-ic-dark font-mono">
                               {formatShortDateEs(tempStart)} – {formatShortDateEs(tempEnd)}
                             </strong>
@@ -1242,29 +1376,24 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 1. CONTEO GENERAL POR CANAL */}
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-serif font-bold text-ic-dark uppercase tracking-wider">
-                  1. Conteo General por Canal
-                </h2>
-                {selectedChannelFilter !== 'all' && (
-                  <button
-                    onClick={() => setSelectedChannelFilter('all')}
-                    className="text-xs text-ic-red font-medium hover:underline"
-                  >
-                    Ver todos
-                  </button>
-                )}
+            {/* ===============================================================
+                1. CONTEO GENERAL POR CANAL (Con Gráfico de Barras y Scroll al clicar)
+               =============================================================== */}
+            <section className="bg-white border border-ic-border">
+              <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-1.5 h-5 bg-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    1. Conteo General por Canal
+                  </h2>
+                </div>
+                <span className="text-[11px] text-ic-muted">
+                  Haz clic en un canal para ir a su desglose
+                </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 bg-white border border-ic-border divide-y sm:divide-y-0 sm:divide-x divide-ic-border">
-                <button
-                  onClick={() => setSelectedChannelFilter('all')}
-                  className={`p-5 text-left transition-colors ${
-                    selectedChannelFilter === 'all' ? 'bg-ic-redSoft/60' : 'hover:bg-gray-50'
-                  }`}
-                >
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-ic-border">
+                <div className="p-5 bg-[#FAFAFA]/60">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
                     Total General
                   </div>
@@ -1274,23 +1403,24 @@ export const App: React.FC = () => {
                   <div className="mt-1 text-[11px] text-ic-muted tabular-nums">
                     {channelTotals.grandTotalUnique.toLocaleString()} únicos
                   </div>
-                </button>
+                </div>
 
                 {(Object.keys(CHANNEL_LABELS) as ChannelKey[]).map((ch) => {
                   const stat = channelTotals.byChannel[ch];
                   const pct = Math.round(
                     (stat.clicks / Math.max(1, channelTotals.grandTotalClicks)) * 100
                   );
-                  const isSelected = selectedChannelFilter === ch;
+                  const isActive = highlightedChannel === ch;
                   return (
                     <button
                       key={ch}
-                      onClick={() => setSelectedChannelFilter(isSelected ? 'all' : ch)}
+                      type="button"
+                      onClick={() => scrollToChannelSection(ch)}
                       className={`p-5 text-left transition-colors relative ${
-                        isSelected ? 'bg-ic-redSoft/60' : 'hover:bg-gray-50'
+                        isActive ? 'bg-ic-redSoft/60' : 'hover:bg-gray-50'
                       }`}
                     >
-                      {isSelected && (
+                      {isActive && (
                         <div className="absolute top-0 left-0 right-0 h-0.5 bg-ic-red" />
                       )}
                       <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
@@ -1307,320 +1437,379 @@ export const App: React.FC = () => {
                   );
                 })}
               </div>
+
+              <MinimalBarChart
+                title="Comparativa Visual por Canal"
+                items={channelTotals.chartItems}
+              />
             </section>
 
-            {/* 2. NUEVO BLOQUE: RESULTADOS POR CAMPAÑA */}
+            {/* ===============================================================
+                2. DESGLOSE POR CANAL (Siempre imprime todo; sin gráfico por canal)
+               =============================================================== */}
+            <section className="space-y-5">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-5 bg-ic-red" />
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  2. Desglose por Canal
+                </h2>
+              </div>
+
+              {breakdownByChannel.map((block) => {
+                const isHighlighted = highlightedChannel === block.channel;
+                const isAdvisorChannel = block.channel === 'asesor_prospector';
+
+                return (
+                  <div
+                    key={block.channel}
+                    id={`desglose-canal-${block.channel}`}
+                    className={`bg-white border transition-colors scroll-mt-20 ${
+                      isHighlighted ? 'border-ic-red ring-1 ring-ic-red' : 'border-ic-border'
+                    }`}
+                  >
+                    <div className="px-6 py-3.5 bg-[#FAFAFA] border-b border-ic-border flex items-center justify-between">
+                      <h3 className="text-sm font-serif font-bold text-ic-dark">
+                        {block.channelLabel}
+                      </h3>
+                      <div className="flex items-center gap-4 text-xs tabular-nums">
+                        <strong className="text-ic-dark">
+                          {block.totalClicks.toLocaleString()} clics
+                        </strong>
+                        <span className="text-ic-muted">
+                          {block.totalUnique.toLocaleString()} únicos
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                            {isAdvisorChannel && (
+                              <th className="py-2.5 pl-6 pr-4">Asesor</th>
+                            )}
+                            <th className={`py-2.5 ${isAdvisorChannel ? 'px-4' : 'pl-6 pr-4'}`}>
+                              Canal
+                            </th>
+                            <th className="py-2.5 px-4">Campaña</th>
+                            <th className="py-2.5 px-4">Carrera</th>
+                            <th className="py-2.5 px-4">Periodo</th>
+                            <th className="py-2.5 px-4">Código</th>
+                            <th className="py-2.5 px-4 text-right">Clics</th>
+                            <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 text-xs">
+                          {block.rows.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={isAdvisorChannel ? 8 : 7}
+                                className="py-4 px-6 text-ic-muted"
+                              >
+                                Sin registros en el periodo seleccionado.
+                              </td>
+                            </tr>
+                          ) : (
+                            block.rows.map((row) => {
+                              const code = `${row.campaign}_${row.period}`;
+                              return (
+                                <tr key={row.id} className="hover:bg-gray-50">
+                                  {isAdvisorChannel && (
+                                    <td className="py-2.5 pl-6 pr-4 font-semibold text-ic-dark">
+                                      {row.advisor_name || row.subcampaign}
+                                    </td>
+                                  )}
+                                  <td
+                                    className={`py-2.5 ${
+                                      isAdvisorChannel ? 'px-4' : 'pl-6 pr-4'
+                                    } text-ic-slate`}
+                                  >
+                                    {block.channel === 'web_institucional' ||
+                                    block.channel === 'asesor_prospector'
+                                      ? block.channelLabel
+                                      : `${block.channelLabel} (${row.subcampaign})`}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono font-semibold text-ic-dark">
+                                    {row.campaign}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-medium text-ic-dark">
+                                    {row.career}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono text-ic-slate">
+                                    {row.period}
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                                      {code}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right font-bold text-ic-dark tabular-nums">
+                                    {row.clicks.toLocaleString()}
+                                  </td>
+                                  <td className="py-2.5 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                                    {row.unique_visitors.toLocaleString()}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+
+            {/* ===============================================================
+                3. RESULTADOS POR CAMPAÑA (Con Gráfico de Barras)
+               =============================================================== */}
             <section className="bg-white border border-ic-border">
-              <div className="px-6 py-4 border-b border-ic-border flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-1.5 h-5 bg-ic-red" />
-                  <h2 className="text-base font-serif font-bold text-ic-dark">
-                    2. Resultados por Campaña
-                  </h2>
-                </div>
-                <span className="text-xs font-mono text-ic-muted">
-                  {resultsByCampaign.length} campañas activas
-                </span>
+              <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
+                <div className="w-1.5 h-5 bg-ic-red" />
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  3. Resultados por Campaña
+                </h2>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <th className="py-2.5 px-6">Campaña</th>
+                      <th className="py-2.5 pl-6 pr-4">Canal</th>
+                      <th className="py-2.5 px-4">Campaña</th>
+                      <th className="py-2.5 px-4">Carrera</th>
                       <th className="py-2.5 px-4">Periodo</th>
-                      <th className="py-2.5 px-4">Código de Atención</th>
-                      <th className="py-2.5 px-4">Canales Asociados</th>
-                      <th className="py-2.5 px-4 w-44">Participación</th>
+                      <th className="py-2.5 px-4">Código</th>
+                      <th className="py-2.5 px-4 text-right">Clics</th>
+                      <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ic-border text-xs">
+                    {resultsByCampaign.map((item) => (
+                      <tr key={item.key} className="hover:bg-gray-50">
+                        <td className="py-3 pl-6 pr-4 text-ic-slate">{item.channelLabel}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-ic-dark">
+                          {item.campaign}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-ic-dark">{item.career}</td>
+                        <td className="py-3 px-4 font-mono text-ic-slate">{item.period}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                            {item.code}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                          {item.clicks.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                          {item.unique.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <MinimalBarChart
+                title="Comparativa Visual por Campaña"
+                items={resultsByCampaign.map((c) => ({
+                  label: c.campaign,
+                  sublabel: c.period,
+                  clicks: c.clicks,
+                  unique: c.unique,
+                }))}
+              />
+            </section>
+
+            {/* ===============================================================
+                4. RESULTADOS POR CARRERA (Con Gráfico de Barras)
+               =============================================================== */}
+            <section className="bg-white border border-ic-border">
+              <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
+                <div className="w-1.5 h-5 bg-ic-red" />
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  4. Resultados por Carrera
+                </h2>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                      <th className="py-2.5 pl-6 pr-4">Canal</th>
+                      <th className="py-2.5 px-4">Campaña</th>
+                      <th className="py-2.5 px-4">Carrera</th>
+                      <th className="py-2.5 px-4">Periodo</th>
+                      <th className="py-2.5 px-4">Código</th>
+                      <th className="py-2.5 px-4 text-right">Clics</th>
+                      <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ic-border text-xs">
+                    {resultsByCareer.map((item) => (
+                      <tr key={`${item.career}-${item.period}`} className="hover:bg-gray-50">
+                        <td className="py-3 pl-6 pr-4 text-ic-slate">{item.channelLabel}</td>
+                        <td className="py-3 px-4 font-mono text-ic-dark">{item.campaign}</td>
+                        <td className="py-3 px-4 font-semibold text-ic-dark">{item.career}</td>
+                        <td className="py-3 px-4 font-mono text-ic-slate">{item.period}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
+                            {item.code}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                          {item.clicks.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                          {item.unique.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <MinimalBarChart
+                title="Comparativa Visual por Carrera"
+                items={resultsByCareer.map((c) => ({
+                  label: c.career,
+                  sublabel: c.period,
+                  clicks: c.clicks,
+                  unique: c.unique,
+                }))}
+              />
+            </section>
+
+            {/* ===============================================================
+                5. RESULTADO POR NÚMERO DE WHATSAPP (Sencillo, sin gráfico)
+               =============================================================== */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <section className="bg-white border border-ic-border">
+                <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
+                  <div className="w-1.5 h-5 bg-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    5. Resultado por Número de WhatsApp
+                  </h2>
+                </div>
+
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                      <th className="py-2.5 pl-6 pr-4">Teléfono</th>
+                      <th className="py-2.5 px-4">Etiqueta / Responsable</th>
                       <th className="py-2.5 px-4 text-right">Clics</th>
                       <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ic-border text-xs">
-                    {resultsByCampaign.map((item) => {
-                      const pct = Math.round(
-                        (item.clicks / Math.max(1, channelTotals.grandTotalClicks)) * 100
-                      );
-                      return (
-                        <tr key={item.attentionCode} className="hover:bg-gray-50">
-                          <td className="py-3 px-6 font-mono font-bold text-ic-dark">
-                            {item.campaign}
-                          </td>
-                          <td className="py-3 px-4 font-mono text-ic-slate">
-                            {item.period}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-[11px]">
-                              {item.attentionCode}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-ic-muted">
-                            {item.channelsList.join(', ')}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-gray-100">
-                                <div
-                                  className="h-full bg-ic-red"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-mono text-ic-muted w-8 text-right">
-                                {pct}%
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
-                            {item.clicks.toLocaleString()}
-                          </td>
-                          <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                            {item.unique.toLocaleString()}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {resultsByWhatsApp.map((item) => (
+                      <tr key={item.phone} className="hover:bg-gray-50">
+                        <td className="py-3 pl-6 pr-4 font-mono font-bold text-ic-red">
+                          +{item.phone}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-ic-dark">{item.label}</td>
+                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                          {item.clicks.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                          {item.unique.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-              </div>
-            </section>
+              </section>
 
-            {/* 3. SUBDIVISIONES POR CANAL, PERIODO, CAMPAÑA Y UTM / ASESOR */}
-            <section className="space-y-4">
-              <h2 className="text-xs font-serif font-bold text-ic-dark uppercase tracking-wider">
-                3. Desglose por Canal, Periodo y Escenario (UTM / Asesor / Carrera)
-              </h2>
+              {/* =============================================================
+                  6. RESULTADO POR PERIODO (Sencillo, sin gráfico)
+                 ============================================================= */}
+              <section className="bg-white border border-ic-border">
+                <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
+                  <div className="w-1.5 h-5 bg-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    6. Resultado por Periodo
+                  </h2>
+                </div>
 
-              <div className="space-y-5">
-                {hierarchicalReport.map((channelBlock) => (
-                  <div
-                    key={channelBlock.channel}
-                    className="bg-white border border-ic-border"
-                  >
-                    <div className="px-6 py-3.5 bg-white border-b border-ic-border flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-5 bg-ic-red" />
-                        <h3 className="text-base font-serif font-bold text-ic-dark">
-                          {channelBlock.channelLabel}
-                        </h3>
-                      </div>
-                      <div className="flex items-center gap-6 text-xs tabular-nums">
-                        <strong className="font-bold text-ic-dark text-sm">
-                          {channelBlock.totalClicks.toLocaleString()} clics
-                        </strong>
-                        <span className="text-ic-muted">
-                          {channelBlock.totalUnique.toLocaleString()} únicos
-                        </span>
-                      </div>
-                    </div>
-
-                    {channelBlock.periods.length === 0 ? (
-                      <div className="p-6 text-xs text-ic-muted">
-                        Sin registros en el rango de fechas seleccionado.
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-ic-border">
-                        {channelBlock.periods.map((perBlock) => {
-                          const expandKey = `${channelBlock.channel}::${perBlock.period}`;
-                          const isOpen = expandedGroups[expandKey] ?? true;
-
-                          return (
-                            <div key={expandKey}>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setExpandedGroups((prev) => ({
-                                    ...prev,
-                                    [expandKey]: !isOpen,
-                                  }))
-                                }
-                                className="w-full px-6 py-2.5 bg-[#FAFAFA] hover:bg-gray-100 flex items-center justify-between text-left"
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  {isOpen ? (
-                                    <ChevronDown className="w-4 h-4 text-ic-red" />
-                                  ) : (
-                                    <ChevronRight className="w-4 h-4 text-ic-muted" />
-                                  )}
-                                  <span className="text-xs font-semibold uppercase tracking-wider text-ic-muted">
-                                    Periodo:
-                                  </span>
-                                  <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
-                                    {perBlock.period}
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center gap-6 text-xs tabular-nums">
-                                  <span className="font-bold text-ic-dark">
-                                    {perBlock.clicks.toLocaleString()} clics
-                                  </span>
-                                  <span className="text-ic-muted w-24 text-right">
-                                    {perBlock.unique.toLocaleString()} únicos
-                                  </span>
-                                </div>
-                              </button>
-
-                              {isOpen && (
-                                <table className="w-full text-left border-collapse">
-                                  <thead>
-                                    <tr className="border-t border-b border-ic-border bg-white text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                                      <th className="py-2 pl-12 pr-4">Campaña</th>
-                                      <th className="py-2 px-4">
-                                        {channelBlock.channel === 'web_institucional'
-                                          ? 'Carrera / Página Detectada'
-                                          : channelBlock.channel === 'asesor_prospector'
-                                          ? 'Asesor / Prospector'
-                                          : 'UTM / Origen'}
-                                      </th>
-                                      <th className="py-2 px-4">Código de Atención</th>
-                                      <th className="py-2 px-4 text-right">Clics</th>
-                                      <th className="py-2 pr-6 pl-4 text-right w-32">Únicos</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100 text-xs">
-                                    {perBlock.subcampaigns.map((sub) => {
-                                      const isPurgeableSub = isTestRecord(sub);
-                                      return (
-                                        <tr key={sub.id} className="hover:bg-gray-50/80">
-                                          <td className="py-2.5 pl-12 pr-4 font-mono font-semibold text-ic-dark">
-                                            {sub.campaign}
-                                          </td>
-                                          <td className="py-2.5 px-4 font-medium text-ic-dark">
-                                            <div className="flex items-center gap-2">
-                                              <span>{sub.subcampaign}</span>
-                                              {isPurgeableSub && (
-                                                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
-                                                  PRUEBA
-                                                </span>
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td className="py-2.5 px-4 font-mono text-[11px] text-ic-muted">
-                                            {sub.campaign}_{sub.period}
-                                          </td>
-                                          <td className="py-2.5 px-4 text-right font-bold text-ic-dark tabular-nums">
-                                            {sub.clicks.toLocaleString()}
-                                          </td>
-                                          <td className="py-2.5 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                                            <div className="inline-flex items-center justify-end gap-2">
-                                              <span>{sub.unique_visitors.toLocaleString()}</span>
-                                              {isPurgeableSub && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setPurgeMode('specific_target');
-                                                    setPurgeTargetId(sub.id);
-                                                    setPurgeStartDate('2025-01-01');
-                                                    setPurgeEndDate('2029-12-31');
-                                                    setPurgeRemoveEmpty(true);
-                                                    setPurgeFeedback(null);
-                                                    setIsPurgeModalOpen(true);
-                                                  }}
-                                                  className="px-1.5 py-0.5 text-[10px] font-medium text-ic-red hover:bg-ic-redSoft border border-ic-red/30"
-                                                >
-                                                  Limpiar
-                                                </button>
-                                              )}
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 4. RANKING DE CARRERAS DEL SITIO WEB (/carrera/...) */}
-            <section className="bg-white border border-ic-border p-6 space-y-4">
-              <div className="border-b border-ic-border pb-3">
-                <h2 className="text-base font-serif font-bold text-ic-dark">
-                  4. Ranking de Carreras del Portal Web (/carrera/...)
-                </h2>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-                {websiteCareersRanking.map((career, idx) => {
-                  const max = websiteCareersRanking[0]?.clicks || 1;
-                  const widthPct = Math.round((career.clicks / max) * 100);
-                  return (
-                    <div
-                      key={career.id}
-                      className="py-2 border-b border-gray-100 flex flex-col gap-1.5"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[11px] text-ic-red font-bold w-5">
-                            0{idx + 1}
-                          </span>
-                          <span className="font-semibold text-ic-dark">
-                            {career.subcampaign}
-                          </span>
-                        </div>
-                        <span className="font-bold text-ic-dark tabular-nums">
-                          {career.clicks.toLocaleString()} clics
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-4 pl-7">
-                        <span className="text-[11px] font-mono text-ic-muted truncate">
-                          {career.url_reference}
-                        </span>
-                        <div className="w-28 h-1.5 bg-gray-100 flex-shrink-0">
-                          <div
-                            className="h-full bg-ic-dark"
-                            style={{ width: `${widthPct}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                      <th className="py-2.5 pl-6 pr-4">Periodo</th>
+                      <th className="py-2.5 px-4">Estado</th>
+                      <th className="py-2.5 px-4 text-right">Clics</th>
+                      <th className="py-2.5 pr-6 pl-4 text-right">Únicos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ic-border text-xs">
+                    {resultsByPeriod.map((item) => (
+                      <tr key={item.period} className="hover:bg-gray-50">
+                        <td className="py-3 pl-6 pr-4 font-mono font-bold text-ic-dark">
+                          {item.period}
+                        </td>
+                        <td className="py-3 px-4">
+                          {item.isActive ? (
+                            <span className="px-2 py-0.5 bg-ic-red text-white text-[10px] font-semibold uppercase">
+                              Activo Global
+                            </span>
+                          ) : (
+                            <span className="text-ic-muted">Histórico</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                          {item.clicks.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                          {item.unique.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            </div>
           </>
         )}
 
         {/* ===================================================================
-            GENERADOR DE ENLACES (Sin alias cortos manuales, UTM automático)
+            MÓDULO 02: GENERADOR DE ENLACES (Periodo Informativo + Carrera)
            =================================================================== */}
-        {activeModule === 'generator' && isAuthenticated && (
+        {activeModule === 'generator' && (
           <div className="space-y-6">
             <div className="border-b border-ic-border pb-4 flex items-center justify-between">
               <h1 className="text-2xl font-serif font-bold text-ic-dark">
                 Generador de Enlaces
               </h1>
-              <span className="text-xs font-mono text-ic-muted">
-                Periodo Activo Global: <strong className="text-ic-red">{activePeriod}</strong>
-              </span>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-ic-muted">Periodo Activo Global:</span>
+                <span className="px-2.5 py-1 bg-ic-red text-white font-mono font-bold">
+                  {activePeriod}
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               {/* FORMULARIO CREADOR */}
-              <div className="lg:col-span-5 bg-white border border-ic-border p-6 space-y-5">
+              <div className="lg:col-span-5 bg-white border border-ic-border p-6 space-y-4">
                 <form onSubmit={handleCreateLink} className="space-y-4">
-                  {/* 1. ESCENARIO / CANAL */}
+                  {/* 1. CANAL */}
                   <div>
                     <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-dark mb-1.5">
-                      1. Escenario *
+                      1. Canal *
                     </label>
                     <select
                       value={genChannel}
                       onChange={(e) => setGenChannel(e.target.value as ChannelKey)}
                       className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
                     >
-                      <option value="link_ads">Link Ads (TikTok, Google Display, PMax, YouTube)</option>
+                      <option value="web_institucional">Portal Web</option>
+                      <option value="link_ads">
+                        Link Ads (TikTok, Google Display, PMax, YouTube)
+                      </option>
                       <option value="mailing_sms_chattigo">
                         Mailing / SMS / Chattigo (/CRM)
                       </option>
                       <option value="asesor_prospector">Asesor / Prospector</option>
-                      <option value="web_institucional">Portal Web Institucional</option>
                     </select>
                   </div>
 
@@ -1628,7 +1817,7 @@ export const App: React.FC = () => {
                   {genChannel === 'link_ads' && (
                     <div>
                       <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                        Plataforma de Pauta (utm) *
+                        Plataforma (utm) *
                       </label>
                       <select
                         value={genLinkAdsUtm}
@@ -1647,7 +1836,7 @@ export const App: React.FC = () => {
                   {genChannel === 'mailing_sms_chattigo' && (
                     <div>
                       <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                        Medio de Envío (utm) *
+                        Medio (utm) *
                       </label>
                       <select
                         value={genCrmOrigin}
@@ -1667,7 +1856,7 @@ export const App: React.FC = () => {
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
-                          Seleccionar Asesor *
+                          Asesor *
                         </label>
                         <button
                           type="button"
@@ -1691,97 +1880,99 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {genChannel === 'web_institucional' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1.5">
-                        URL o Carrera Específica (Opcional)
-                      </label>
-                      <input
-                        type="text"
-                        value={genPortalSubsite}
-                        onChange={(e) => setGenPortalSubsite(e.target.value)}
-                        placeholder="https://icontinental.edu.pe/carrera/diseno-de-modas/"
-                        className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                      />
-                    </div>
-                  )}
-
-                  {/* 2. CAMPAÑA (Seleccionar existente o escribir nueva en MAYÚSCULA_CON_GUION_BAJO) */}
+                  {/* 2. CAMPAÑA Y 3. CARRERA + PERIODO INFORMATIVO */}
                   <div className="p-3.5 bg-[#FAFAFA] border border-ic-border space-y-3">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                        2. Campaña *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setGenCampaignMode((m) => (m === 'select' ? 'new' : 'select'))
-                        }
-                        className="text-[11px] text-ic-red font-semibold hover:underline"
-                      >
-                        {genCampaignMode === 'select'
-                          ? '+ Nueva campaña'
-                          : 'Elegir existente'}
-                      </button>
-                    </div>
-
-                    {genCampaignMode === 'select' ? (
-                      <select
-                        value={genSelectedCampaign}
-                        onChange={(e) => setGenSelectedCampaign(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
-                      >
-                        {campaigns.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div>
-                        <input
-                          type="text"
-                          required
-                          maxLength={30}
-                          value={genNewCampaignInput}
-                          onChange={(e) =>
-                            setGenNewCampaignInput(sanitizeCampaignInput(e.target.value))
-                          }
-                          placeholder="EJ: NURTURING_CHATTIGO"
-                          className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white focus:outline-none focus:border-ic-red"
-                        />
-                        <div className="text-[10px] text-ic-muted mt-1 flex justify-between">
-                          <span>Solo MAYÚSCULAS y _ (espacio = _)</span>
-                          <span className="font-mono">{genNewCampaignInput.length}/30</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. PERIODO */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                          3. Periodo *
+                          2. Campaña *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setGenCampaignMode((m) => (m === 'select' ? 'new' : 'select'))
+                          }
+                          className="text-[11px] text-ic-red font-semibold hover:underline"
+                        >
+                          {genCampaignMode === 'select'
+                            ? '+ Nueva campaña'
+                            : 'Elegir existente'}
+                        </button>
+                      </div>
+
+                      {genCampaignMode === 'select' ? (
+                        <select
+                          value={genSelectedCampaign}
+                          onChange={(e) => setGenSelectedCampaign(e.target.value)}
+                          className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                        >
+                          {campaigns.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div>
+                          <input
+                            type="text"
+                            required
+                            maxLength={30}
+                            value={genNewCampaignInput}
+                            onChange={(e) =>
+                              setGenNewCampaignInput(sanitizeCampaignInput(e.target.value))
+                            }
+                            placeholder="EJ: NURTURING_CHATTIGO"
+                            className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white focus:outline-none focus:border-ic-red"
+                          />
+                          <div className="text-[10px] text-ic-muted mt-1 flex justify-between">
+                            <span>Solo MAYÚSCULAS y _</span>
+                            <span className="font-mono">{genNewCampaignInput.length}/30</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. CARRERA */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
+                          3. Carrera *
                         </label>
                         <button
                           type="button"
                           onClick={() => setActiveModule('tools')}
-                          className="text-[11px] text-ic-red hover:underline"
+                          className="text-[11px] text-ic-red font-medium hover:underline"
                         >
-                          Gestionar periodos
+                          + Crear Carrera
                         </button>
                       </div>
                       <select
-                        value={genPeriod}
-                        onChange={(e) => setGenPeriod(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                        value={genCareer}
+                        onChange={(e) => setGenCareer(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white"
                       >
-                        {periods.map((p) => (
-                          <option key={p.code} value={p.code}>
-                            {p.code} {p.is_active ? '(Activo Global)' : ''}
+                        {careers.map((car) => (
+                          <option key={car.id} value={car.name}>
+                            {car.name}
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    {/* 4. PERIODO (SOLO INFORMATIVO — REGLA GLOBAL) */}
+                    <div className="pt-2 border-t border-ic-border flex items-center justify-between text-xs">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
+                        Periodo Activo (Global):
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-white border border-ic-border font-mono font-bold text-ic-red">
+                          {activePeriod}
+                        </span>
+                        <span className="font-mono text-[11px] text-ic-dark font-semibold">
+                          → {effectiveCampaign}_{activePeriod}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1789,7 +1980,7 @@ export const App: React.FC = () => {
                   {genChannel !== 'asesor_prospector' && (
                     <div>
                       <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                        Número de WhatsApp Destino
+                        Número de WhatsApp
                       </label>
                       <select
                         value={genWaPhone}
@@ -1805,13 +1996,18 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Vista previa del Mensaje Pre-rellenado con Código de Atención */}
+                  {/* Vista previa del Texto Pre-escrito */}
                   <div className="p-3 bg-[#FAFAFA] border border-ic-border space-y-1.5">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                      <span>Mensaje Automático WhatsApp</span>
-                      <span className="text-ic-red font-mono">
-                        {effectiveCampaign}_{genPeriod}
-                      </span>
+                      <span>Texto Pre-escrito WhatsApp</span>
+                      <a
+                        href={directWhatsAppPreviewUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-ic-red hover:underline inline-flex items-center gap-1 font-semibold"
+                      >
+                        Probar texto en WhatsApp <ExternalLink className="w-3 h-3" />
+                      </a>
                     </div>
                     <div className="text-xs text-ic-dark font-mono bg-white p-2.5 border border-ic-border leading-relaxed">
                       {effectiveWaMessage}
@@ -1821,7 +2017,7 @@ export const App: React.FC = () => {
                   {/* ENLACE FINAL GENERADO POR EL SISTEMA */}
                   <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-2.5">
                     <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-dark">
-                      Enlace Final Generado (utm=):
+                      Enlace Generado:
                     </div>
                     <div className="p-2.5 bg-white border border-ic-border font-mono text-[11px] text-ic-dark break-all select-all">
                       {generatedSystemUrl}
@@ -1867,7 +2063,7 @@ export const App: React.FC = () => {
 
                   {genFeedbackUrl && (
                     <div className="p-2.5 bg-green-50 border border-green-200 text-xs text-green-900 font-mono truncate">
-                      Guardado: {genFeedbackUrl}
+                      Enlace copiado y guardado.
                     </div>
                   )}
                 </form>
@@ -1886,7 +2082,7 @@ export const App: React.FC = () => {
                       type="text"
                       value={linkSearch}
                       onChange={(e) => setLinkSearch(e.target.value)}
-                      placeholder="Buscar campaña, periodo, utm..."
+                      placeholder="Buscar campaña, carrera, código..."
                       className="w-full pl-8 pr-3 py-1.5 text-xs border border-ic-border focus:outline-none"
                     />
                   </div>
@@ -1897,6 +2093,7 @@ export const App: React.FC = () => {
                     .filter(
                       (l) =>
                         l.campaign.toLowerCase().includes(linkSearch.toLowerCase()) ||
+                        l.career.toLowerCase().includes(linkSearch.toLowerCase()) ||
                         l.period.toLowerCase().includes(linkSearch.toLowerCase()) ||
                         l.subcampaign.toLowerCase().includes(linkSearch.toLowerCase())
                     )
@@ -1913,8 +2110,8 @@ export const App: React.FC = () => {
                             <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
                               {link.campaign}_{link.period}
                             </span>
-                            <span className="text-xs font-mono text-ic-slate">
-                              utm={link.subcampaign}
+                            <span className="text-xs font-semibold text-ic-dark">
+                              {link.career}
                             </span>
                             {link.is_purgeable && (
                               <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
@@ -1927,11 +2124,9 @@ export const App: React.FC = () => {
                             {link.normal_url}
                           </div>
 
-                          {link.whatsapp_message && (
-                            <div className="text-[11px] text-ic-muted truncate">
-                              {link.whatsapp_message}
-                            </div>
-                          )}
+                          <div className="text-[11px] text-ic-muted truncate">
+                            {link.whatsapp_message}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -1966,7 +2161,7 @@ export const App: React.FC = () => {
                               onClick={() =>
                                 setConfirmDelete({
                                   title: '¿Seguro que quieres eliminar este enlace?',
-                                  description: `Se eliminará el enlace ${link.campaign}_${link.period} (${link.subcampaign}).`,
+                                  description: `Se eliminará ${link.campaign}_${link.period} (${link.career}).`,
                                   onConfirm: async () => {
                                     await DataEngine.deleteLink(link.id);
                                     refreshLocalState();
@@ -1989,13 +2184,13 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO CONFIGURACIÓN Y HERRAMIENTAS (Periodos, Asesores, WhatsApp, QR)
+            MÓDULO 03: CONFIGURACIÓN (Periodos, Carreras, Asesores, WhatsApp, QR)
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
-            <div className="border-b border-ic-border pb-4 flex items-center justify-between">
+            <div className="border-b border-ic-border pb-4">
               <h1 className="text-2xl font-serif font-bold text-ic-dark">
-                Configuración de Periodos, Asesores y WhatsApp
+                Configuración
               </h1>
             </div>
 
@@ -2103,15 +2298,11 @@ export const App: React.FC = () => {
                               })
                             }
                             className="p-1 text-ic-muted hover:text-ic-red"
-                            title="Eliminar periodo sin uso"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         ) : (
-                          <span
-                            className="text-[10px] font-mono text-ic-muted px-1.5"
-                            title="En uso: limpia sus enlaces o métricas para poder eliminarlo"
-                          >
+                          <span className="text-[10px] font-mono text-ic-muted px-1.5">
                             En uso
                           </span>
                         )}
@@ -2121,12 +2312,84 @@ export const App: React.FC = () => {
                 </div>
               </section>
 
-              {/* 2. CONSTRUCTOR DE ASESOR / PROSPECTOR */}
+              {/* 2. MÓDULO DE CREACIÓN DE CARRERAS */}
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-ic-red" />
+                    <h2 className="text-base font-serif font-bold text-ic-dark">
+                      2. Creación de Carreras
+                    </h2>
+                  </div>
+                  <span className="text-xs font-mono text-ic-muted">
+                    {careers.length} carreras
+                  </span>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!newCareerInput.trim()) return;
+                    await DataEngine.createCareer(newCareerInput);
+                    setNewCareerInput('');
+                    refreshLocalState();
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    required
+                    value={newCareerInput}
+                    onChange={(e) => setNewCareerInput(e.target.value)}
+                    placeholder="Nombre de la carrera (Ej: Gastronomía)"
+                    className="flex-1 px-3 py-2 text-xs border border-ic-border bg-white"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                  >
+                    Agregar Carrera
+                  </button>
+                </form>
+
+                <div className="border border-ic-border divide-y divide-ic-border max-h-64 overflow-y-auto">
+                  {careers.map((car) => (
+                    <div
+                      key={car.id}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <span className="font-semibold text-ic-dark">{car.name}</span>
+                      {careers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: `¿Seguro que quieres eliminar la carrera "${car.name}"?`,
+                              description: 'Se quitará de la lista de carreras disponibles.',
+                              onConfirm: async () => {
+                                await DataEngine.deleteCareer(car.id);
+                                refreshLocalState();
+                              },
+                            })
+                          }
+                          className="p-1 text-ic-muted hover:text-ic-red"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            {/* 3. ASESORES Y 4. NÚMEROS DE WHATSAPP */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <UserCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    2. Asesores / Prospectores
+                    3. Asesores / Prospectores
                   </h2>
                 </div>
 
@@ -2166,7 +2429,7 @@ export const App: React.FC = () => {
                     type="submit"
                     className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
                   >
-                    {editingAdvisorId ? 'Actualizar' : 'Agregar Asesor'}
+                    {editingAdvisorId ? 'Actualizar' : 'Agregar'}
                   </button>
                 </form>
 
@@ -2177,13 +2440,8 @@ export const App: React.FC = () => {
                       className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
                     >
                       <div>
-                        <div className="font-semibold text-ic-dark">
-                          {adv.name}{' '}
-                          <span className="font-mono text-ic-red">+{adv.phone_number}</span>
-                        </div>
-                        <div className="text-[11px] text-ic-muted truncate max-w-md">
-                          "Hola, {adv.name}, quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención [Campaña]_{activePeriod}"
-                        </div>
+                        <span className="font-semibold text-ic-dark">{adv.name}</span>{' '}
+                        <span className="font-mono text-ic-red">+{adv.phone_number}</span>
                       </div>
 
                       <div className="flex items-center gap-1.5">
@@ -2203,7 +2461,7 @@ export const App: React.FC = () => {
                           onClick={() =>
                             setConfirmDelete({
                               title: `¿Seguro que quieres eliminar al asesor ${adv.name}?`,
-                              description: 'Esta acción quitará al asesor de la lista.',
+                              description: 'Se quitará de la lista de asesores.',
                               onConfirm: async () => {
                                 await DataEngine.deleteAdvisor(adv.id);
                                 refreshLocalState();
@@ -2219,72 +2477,13 @@ export const App: React.FC = () => {
                   ))}
                 </div>
               </section>
-            </div>
 
-            {/* 3. NÚMEROS DE WHATSAPP INSTITUCIONALES */}
-            <section className="bg-white border border-ic-border p-6 space-y-4">
-              <div className="flex items-center gap-2 border-b border-ic-border pb-3">
-                <Phone className="w-4 h-4 text-ic-red" />
-                <h2 className="text-base font-serif font-bold text-ic-dark">
-                  3. Números de WhatsApp Institucionales
-                </h2>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-7 border border-ic-border">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                        <th className="py-2.5 px-4">Canal / Etiqueta</th>
-                        <th className="py-2.5 px-4">Área</th>
-                        <th className="py-2.5 px-4">Teléfono</th>
-                        <th className="py-2.5 px-4 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ic-border text-xs">
-                      {waNumbers.map((w) => (
-                        <tr key={w.id} className="hover:bg-gray-50">
-                          <td className="py-2.5 px-4 font-semibold text-ic-dark">{w.label}</td>
-                          <td className="py-2.5 px-4 text-ic-muted">{w.department}</td>
-                          <td className="py-2.5 px-4 font-mono font-bold text-ic-red">
-                            +{w.phone_number}
-                          </td>
-                          <td className="py-2.5 px-4 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setEditingWaId(w.id);
-                                  setWaLabelInput(w.label);
-                                  setWaPhoneInput(w.phone_number);
-                                  setWaDeptInput(w.department);
-                                }}
-                                className="p-1 text-ic-muted hover:text-ic-dark"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              {waNumbers.length > 1 && (
-                                <button
-                                  onClick={() =>
-                                    setConfirmDelete({
-                                      title: '¿Seguro que quieres eliminar este número de WhatsApp?',
-                                      description: `Se eliminará "${w.label}" (+${w.phone_number}) de forma permanente.`,
-                                      onConfirm: async () => {
-                                        await DataEngine.deleteWhatsAppNumber(w.id);
-                                        refreshLocalState();
-                                      },
-                                    })
-                                  }
-                                  className="p-1 text-ic-muted hover:text-ic-red"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center gap-2 border-b border-ic-border pb-3">
+                  <Phone className="w-4 h-4 text-ic-red" />
+                  <h2 className="text-base font-serif font-bold text-ic-dark">
+                    4. Números de WhatsApp Institucionales
+                  </h2>
                 </div>
 
                 <form
@@ -2296,61 +2495,94 @@ export const App: React.FC = () => {
                       label: waLabelInput,
                       phone_number: waPhoneInput,
                       department: waDeptInput,
-                      default_greeting:
-                        'Hola, quisiera saber más sobre Instituto y Escuela Superior Continental.',
+                      default_greeting: '',
                     });
                     setEditingWaId(null);
                     setWaLabelInput('');
                     setWaPhoneInput('');
                     refreshLocalState();
                   }}
-                  className="lg:col-span-5 bg-[#FAFAFA] border border-ic-border p-4 space-y-3"
+                  className="grid grid-cols-1 sm:grid-cols-3 gap-2"
                 >
-                  <div className="text-xs font-serif font-bold text-ic-dark">
-                    {editingWaId ? 'Editar Número' : 'Nuevo Número de WhatsApp'}
-                  </div>
                   <input
                     type="text"
                     required
                     value={waLabelInput}
                     onChange={(e) => setWaLabelInput(e.target.value)}
-                    placeholder="Etiqueta (Ej: WhatsApp Admisión)"
-                    className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
+                    placeholder="Etiqueta (Ej: Admisión)"
+                    className="px-3 py-2 text-xs border border-ic-border bg-white"
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      required
-                      value={waPhoneInput}
-                      onChange={(e) => setWaPhoneInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="51987654321"
-                      className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                    />
-                    <input
-                      type="text"
-                      value={waDeptInput}
-                      onChange={(e) => setWaDeptInput(e.target.value)}
-                      placeholder="Área"
-                      className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={waPhoneInput}
+                    onChange={(e) => setWaPhoneInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="51987654321"
+                    className="px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                  />
                   <button
                     type="submit"
-                    className="w-full py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
                   >
-                    {editingWaId ? 'Actualizar' : 'Guardar Número'}
+                    {editingWaId ? 'Actualizar' : 'Guardar'}
                   </button>
                 </form>
-              </div>
-            </section>
 
-            {/* 4. QR Y SIMULADOR */}
+                <div className="border border-ic-border divide-y divide-ic-border">
+                  {waNumbers.map((w) => (
+                    <div
+                      key={w.id}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <div>
+                        <span className="font-semibold text-ic-dark">{w.label}</span>{' '}
+                        <span className="font-mono font-bold text-ic-red">
+                          +{w.phone_number}
+                        </span>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingWaId(w.id);
+                            setWaLabelInput(w.label);
+                            setWaPhoneInput(w.phone_number);
+                            setWaDeptInput(w.department);
+                          }}
+                          className="p-1 text-ic-muted hover:text-ic-dark"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        {waNumbers.length > 1 && (
+                          <button
+                            onClick={() =>
+                              setConfirmDelete({
+                                title: '¿Seguro que quieres eliminar este número de WhatsApp?',
+                                description: `Se eliminará "${w.label}" (+${w.phone_number}).`,
+                                onConfirm: async () => {
+                                  await DataEngine.deleteWhatsAppNumber(w.id);
+                                  refreshLocalState();
+                                },
+                              })
+                            }
+                            className="p-1 text-ic-muted hover:text-ic-red"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            {/* 5. QR Y SIMULADOR */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <QrCode className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    4. Código QR
+                    5. Código QR
                   </h2>
                 </div>
 
@@ -2361,7 +2593,7 @@ export const App: React.FC = () => {
                 >
                   {links.map((l) => (
                     <option key={l.id} value={l.normal_url}>
-                      {l.campaign}_{l.period} ({l.subcampaign})
+                      {l.campaign}_{l.period} — {l.career}
                     </option>
                   ))}
                 </select>
@@ -2414,7 +2646,7 @@ export const App: React.FC = () => {
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <ShieldCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    5. Simulador y Depurador de Pruebas
+                    6. Simulador y Depurador de Pruebas
                   </h2>
                 </div>
 
@@ -2425,7 +2657,7 @@ export const App: React.FC = () => {
                 >
                   {records.map((r) => (
                     <option key={r.id} value={r.id}>
-                      [{r.campaign}_{r.period}] {r.subcampaign}
+                      [{r.campaign}_{r.period}] {r.career} ({r.subcampaign})
                     </option>
                   ))}
                 </select>

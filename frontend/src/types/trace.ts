@@ -6,9 +6,14 @@ export type ChannelKey =
 
 export interface PeriodItem {
   id: number;
-  code: string;        // Ej: "202610", "202620", "202710" (Año + 10 | 20 | 30)
-  is_active: boolean;  // Periodo global activo para nuevos enlaces
+  code: string;        // Ej: "202610", "202620", "202710"
+  is_active: boolean;  // Periodo global activo para todos los enlaces
   usage_count: number; // Enlaces + clics asociados (si > 0 no se puede eliminar)
+}
+
+export interface CareerItem {
+  id: number;
+  name: string;        // Ej: "Diseño de Modas", "Contabilidad", "Gastronomía"
 }
 
 export interface AdvisorItem {
@@ -31,14 +36,15 @@ export interface LinkItem {
   normal_url: string;
   title: string;
   channel: ChannelKey;
-  period: string;      // Ej: "202710"
-  campaign: string;    // Ej: "NURTURING_CHATTIGO", "PORTALWEB", "GASTRONOMIA"
-  subcampaign: string; // Ej: "tiktok-ads", "google-pmax", "Gerber", "Diseño de Modas"
+  period: string;      // Ej: "202710" (tomado del Periodo Global Activo)
+  campaign: string;    // Ej: "NURTURING_CHATTIGO", "PORTALWEB", "ADMISION_PREGRADO"
+  career: string;      // Ej: "Diseño de Modas", "Contabilidad"
+  subcampaign: string; // Ej: "Portal Web", "tiktok-ads", "chattigo", "Gerber"
   advisor_name?: string | null;
   destination_type: 'whatsapp' | 'url';
   destination_url: string | null;
-  whatsapp_phone: string | null;
-  whatsapp_message: string | null;
+  whatsapp_phone: string;
+  whatsapp_message: string;
   is_master_route?: boolean;
   is_purgeable?: boolean;
   total_clicks: number;
@@ -49,10 +55,12 @@ export interface LinkItem {
 export interface SubcampaignRecord {
   id: string;
   channel: ChannelKey;
-  period: string;      // Ej: "202710"
-  campaign: string;    // Ej: "NURTURING_CHATTIGO", "GASTRONOMIA"
-  subcampaign: string; // Ej: "tiktok-ads", "google-display", "Gerber", "Diseño de Modas"
-  url_reference?: string;
+  period: string;         // Ej: "202710"
+  campaign: string;       // Ej: "PORTALWEB", "NURTURING_CHATTIGO"
+  career: string;         // Ej: "Diseño de Modas"
+  subcampaign: string;    // Ej: "Portal Web", "tiktok-ads", "chattigo", "Gerber"
+  advisor_name?: string | null;
+  whatsapp_phone: string; // Ej: "51987654321"
   short_link: string;
   clicks: number;
   unique_visitors: number;
@@ -61,7 +69,7 @@ export interface SubcampaignRecord {
 }
 
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
-  web_institucional: 'Portal Web Institucional',
+  web_institucional: 'Portal Web',
   link_ads: 'Link Ads',
   mailing_sms_chattigo: 'Mailing / SMS / Chattigo (/CRM)',
   asesor_prospector: 'Asesor / Prospector',
@@ -115,36 +123,34 @@ export function isValidPeriodCode(code: string): boolean {
 }
 
 /**
- * Construye el texto predeterminado de WhatsApp y su Código de Atención
- * según el escenario seleccionado.
+ * Construye el texto pre-escrito de WhatsApp unificado para todos los escenarios:
+ * - General: "Hola, vengo de [CANAL], quisiera más información sobre [CARRERA] en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
+ * - Asesor/Prospector: "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA] en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
  */
 export function buildDefaultWhatsAppMessage(params: {
   channel: ChannelKey;
   campaign: string;
+  career: string;
   period: string;
   utmSource?: string;
   advisorName?: string;
-  detectedUrl?: string;
 }): string {
-  const cleanCamp = sanitizeCampaignInput(params.campaign) || 'GENERAL';
+  const cleanCamp = sanitizeCampaignInput(params.campaign) || 'PORTALWEB';
   const cleanPer = params.period || '202710';
-  const baseCode = `${cleanCamp}_${cleanPer}`;
+  const cleanCareer = params.career.trim() || 'Diseño de Modas';
+  const code = `${cleanCamp}_${cleanPer}`;
 
   if (params.channel === 'asesor_prospector') {
-    const advisor = params.advisorName?.trim() || 'Asesor';
-    return `Hola, ${advisor}, quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención ${baseCode}`;
+    const advisor = params.advisorName?.trim() || params.utmSource?.trim() || 'Gerber';
+    return `Hola ${advisor}, vengo de Asesor / Prospector, quisiera más información sobre ${cleanCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
   }
 
-  if (params.channel === 'web_institucional') {
-    const subsite = params.detectedUrl?.trim();
-    if (subsite) {
-      return `Hola, vengo de ${subsite} y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención ${baseCode}`;
-    }
-    return `Hola, vengo del portal web y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención ${baseCode}`;
+  let channelDisplay = CHANNEL_LABELS[params.channel];
+  if (params.channel === 'link_ads' && params.utmSource) {
+    channelDisplay = `Link Ads (${params.utmSource})`;
+  } else if (params.channel === 'mailing_sms_chattigo' && params.utmSource) {
+    channelDisplay = `CRM (${params.utmSource})`;
   }
 
-  const originRaw = (params.utmSource || 'digital').trim();
-  const originCode = originRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const fullCode = originCode ? `${baseCode}_${originCode}` : baseCode;
-  return `Hola, vengo de ${originRaw} y quisiera saber más sobre Instituto y Escuela Superior Continental. Código de atención ${fullCode}`;
+  return `Hola, vengo de ${channelDisplay}, quisiera más información sobre ${cleanCareer} en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }
