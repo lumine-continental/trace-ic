@@ -58,13 +58,20 @@ function ensureSchemaUpgrades(\PDO $pdo): void
         if ((int) $pdo->query("SELECT COUNT(*) FROM `campaigns`")->fetchColumn() === 0) {
             $pdo->exec("
                 INSERT IGNORE INTO `campaigns` (`name`) VALUES
-                ('PORTALWEB'),
-                ('ADMISION_PREGRADO'),
-                ('NURTURING_CHATTIGO'),
+                ('PRESENCIAL'),
                 ('SEMIPRESENCIAL'),
-                ('BECAS_CONTINENTAL'),
-                ('FERIA_COLEGIOS')
+                ('A_DISTANCIA'),
+                ('EVENTOS')
             ");
+        } else {
+            $pdo->exec("
+                INSERT IGNORE INTO `campaigns` (`name`) VALUES
+                ('PRESENCIAL'),
+                ('SEMIPRESENCIAL'),
+                ('A_DISTANCIA'),
+                ('EVENTOS')
+            ");
+            $pdo->exec("DELETE FROM `campaigns` WHERE `name` IN ('PORTALWEB', 'NURTURING_CHATTIGO', 'ADMISION_PREGRADO')");
         }
 
         // 3. Tabla de Carreras (Nueva entidad configurable)
@@ -128,16 +135,26 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             $pdo->exec("
                 INSERT IGNORE INTO `subchannels` (`channel`, `name`) VALUES
                 ('web_institucional', 'portal-web'),
-                ('web_institucional', 'landing-carreras'),
+                ('web_institucional', 'landing-page'),
                 ('link_ads', 'tiktok-ads'),
                 ('link_ads', 'google-search'),
                 ('link_ads', 'google-display'),
                 ('link_ads', 'google-pmax'),
                 ('link_ads', 'google-youtube'),
                 ('link_ads', 'linkedin-ads'),
-                ('mailing_sms_chattigo', 'chattigo'),
+                ('mailing_sms_chattigo', 'mail'),
                 ('mailing_sms_chattigo', 'sms'),
-                ('mailing_sms_chattigo', 'mailing')
+                ('mailing_sms_chattigo', 'whatsapp')
+            ");
+        } else {
+            $pdo->exec("DELETE FROM `subchannels` WHERE `name` IN ('chattigo', 'mailing', 'landing-carreras')");
+            $pdo->exec("
+                INSERT IGNORE INTO `subchannels` (`channel`, `name`) VALUES
+                ('web_institucional', 'portal-web'),
+                ('web_institucional', 'landing-page'),
+                ('mailing_sms_chattigo', 'mail'),
+                ('mailing_sms_chattigo', 'sms'),
+                ('mailing_sms_chattigo', 'whatsapp')
             ");
         }
 
@@ -589,6 +606,13 @@ try {
         jsonResponse(['name' => $name], 201);
     }
 
+    if ($endpoint === 'campaigns/delete' && $method === 'POST') {
+        $body = getJsonBody();
+        $name = sanitizeCampaignCode((string) ($body['name'] ?? ''));
+        $pdo->prepare('DELETE FROM campaigns WHERE name = :name')->execute(['name' => $name]);
+        jsonResponse(['deleted' => true]);
+    }
+
     // =========================================================================
     // GESTIÓN DE ASESORES / PROSPECTORES
     // =========================================================================
@@ -835,16 +859,19 @@ try {
 
         $channel = (string) ($body['channel'] ?? 'web_institucional');
         $period = (string) ($body['period'] ?? '202710');
-        $campaign = sanitizeCampaignCode((string) ($body['campaign'] ?? 'PORTALWEB'));
+        $campaign = sanitizeCampaignCode((string) ($body['campaign'] ?? 'PRESENCIAL'));
         $career = (string) ($body['career'] ?? 'Diseño de Modas');
-        $subcampaign = (string) ($body['subcampaign'] ?? 'Portal Web');
+        $subcampaign = (string) ($body['subcampaign'] ?? 'portal-web');
         $advisorName = $body['advisor_name'] ?? null;
         $waPhone = (string) ($body['whatsapp_phone'] ?? '51987654321');
-        $shortLink = (string) ($body['short_link'] ?? 'trace.icontinental.edu.pe/whatsapp-web');
+        $shortLink = (string) ($body['short_link'] ?? 'trace.icontinental.edu.pe/organico');
 
-        $linkStmt = $pdo->prepare('SELECT id FROM links WHERE channel = :ch ORDER BY is_master_route DESC, id ASC LIMIT 1');
-        $linkStmt->execute(['ch' => $channel]);
-        $linkId = (int) ($linkStmt->fetchColumn() ?: 1);
+        $linkId = !empty($body['link_id']) ? (int) $body['link_id'] : 0;
+        if ($linkId <= 0) {
+            $linkStmt = $pdo->prepare('SELECT id FROM links WHERE channel = :ch ORDER BY is_master_route DESC, id ASC LIMIT 1');
+            $linkStmt->execute(['ch' => $channel]);
+            $linkId = (int) ($linkStmt->fetchColumn() ?: 1);
+        }
 
         $stmt = $pdo->prepare("
             INSERT INTO click_events (

@@ -85,18 +85,18 @@ try {
             'whatsapp_phone'  => '51987654321',
             'status'          => 'active',
         ];
-        if ($lowerSlug === 'link-ads' || $lowerSlug === 'tiktok') {
+        if (in_array($lowerSlug, ['pauta', 'link-ads', 'tiktok'], true)) {
             $link['channel'] = 'link_ads';
-            $link['slug'] = 'link-ads';
+            $link['slug'] = 'pauta';
         } elseif ($lowerSlug === 'asesor') {
             $link['channel'] = 'asesor_prospector';
             $link['slug'] = 'asesor';
-        } elseif ($lowerSlug === 'crm') {
+        } elseif (in_array($lowerSlug, ['nurturing', 'crm'], true)) {
             $link['channel'] = 'mailing_sms_chattigo';
-            $link['slug'] = 'CRM';
+            $link['slug'] = 'nurturing';
         } else {
             $link['channel'] = 'web_institucional';
-            $link['slug'] = 'whatsapp-web';
+            $link['slug'] = 'organico';
         }
     }
 
@@ -160,18 +160,18 @@ try {
         : ((string) ($link['subcampaign'] ?: 'portal-web'));
 
     $channelNames = [
-        'web_institucional'    => 'Portal Web',
-        'link_ads'             => 'Link Ads',
+        'web_institucional'    => 'Orgánico',
+        'link_ads'             => 'Pauta',
         'mailing_sms_chattigo' => 'Nurturing',
         'asesor_prospector'    => 'Asesor / Prospector',
     ];
-    $channelDisplay = $channelNames[$link['channel']] ?? 'Portal Web';
+    $channelDisplay = $channelNames[$link['channel']] ?? 'Orgánico';
 
     $phone = $paramPhone !== '' ? $paramPhone : preg_replace('/\D/', '', (string) ($link['whatsapp_phone'] ?: '51987654321'));
-    $attentionCode = $finalCampaign . '_' . $finalPeriod;
     $advisorName = null;
 
     if ($link['channel'] === 'asesor_prospector') {
+        $attentionCode = $finalCampaign . '_' . $finalPeriod;
         $advisorName = $finalSubcampaign ?: 'Asesor';
         try {
             $advStmt = $pdo->prepare('SELECT name, phone_number FROM advisors WHERE LOWER(name) = LOWER(:n) LIMIT 1');
@@ -188,7 +188,8 @@ try {
         }
         $message = "Hola {$advisorName}, vengo de Asesor / Prospector, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     } else {
-        $message = "Hola, vengo de {$channelDisplay}, ({$finalSubcampaign}), quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
+        $attentionCode = strtoupper($finalSubcampaign) . '_' . $finalPeriod;
+        $message = "Hola, vengo de {$channelDisplay}, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     }
 
     $shortLinkDisplay = sprintf(

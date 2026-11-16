@@ -15,14 +15,14 @@ import {
 } from '../types/trace';
 
 const STORAGE_KEYS = {
-  PERIODS: 'trace_ic_v7_periods',
-  CAMPAIGNS: 'trace_ic_v7_campaigns',
-  CAREERS: 'trace_ic_v7_careers',
-  SUBCHANNELS: 'trace_ic_v7_subchannels',
-  ADVISORS: 'trace_ic_v7_advisors',
-  LINKS: 'trace_ic_v7_links',
-  RECORDS: 'trace_ic_v7_records',
-  WA_NUMBERS: 'trace_ic_v7_wa',
+  PERIODS: 'trace_ic_v8_periods',
+  CAMPAIGNS: 'trace_ic_v8_campaigns',
+  CAREERS: 'trace_ic_v8_careers',
+  SUBCHANNELS: 'trace_ic_v8_subchannels',
+  ADVISORS: 'trace_ic_v8_advisors',
+  LINKS: 'trace_ic_v8_links',
+  RECORDS: 'trace_ic_v8_records',
+  WA_NUMBERS: 'trace_ic_v8_wa',
 };
 
 const INITIAL_PERIODS: PeriodItem[] = [
@@ -33,12 +33,10 @@ const INITIAL_PERIODS: PeriodItem[] = [
 ];
 
 const INITIAL_CAMPAIGNS: string[] = [
-  'PORTALWEB',
-  'ADMISION_PREGRADO',
-  'NURTURING_CHATTIGO',
+  'PRESENCIAL',
   'SEMIPRESENCIAL',
-  'BECAS_CONTINENTAL',
-  'FERIA_COLEGIOS',
+  'A_DISTANCIA',
+  'EVENTOS',
 ];
 
 const INITIAL_CAREERS: CareerItem[] = [
@@ -54,16 +52,16 @@ const INITIAL_CAREERS: CareerItem[] = [
 
 const INITIAL_SUBCHANNELS: SubchannelItem[] = [
   { id: 1, channel: 'web_institucional', name: 'portal-web' },
-  { id: 2, channel: 'web_institucional', name: 'landing-carreras' },
+  { id: 2, channel: 'web_institucional', name: 'landing-page' },
   { id: 3, channel: 'link_ads', name: 'tiktok-ads' },
   { id: 4, channel: 'link_ads', name: 'google-search' },
   { id: 5, channel: 'link_ads', name: 'google-display' },
   { id: 6, channel: 'link_ads', name: 'google-pmax' },
   { id: 7, channel: 'link_ads', name: 'google-youtube' },
   { id: 8, channel: 'link_ads', name: 'linkedin-ads' },
-  { id: 9, channel: 'mailing_sms_chattigo', name: 'chattigo' },
+  { id: 9, channel: 'mailing_sms_chattigo', name: 'mail' },
   { id: 10, channel: 'mailing_sms_chattigo', name: 'sms' },
-  { id: 11, channel: 'mailing_sms_chattigo', name: 'mailing' },
+  { id: 11, channel: 'mailing_sms_chattigo', name: 'whatsapp' },
 ];
 
 const INITIAL_ADVISORS: AdvisorItem[] = [
@@ -74,7 +72,7 @@ const INITIAL_ADVISORS: AdvisorItem[] = [
 const INITIAL_WA_NUMBERS: WhatsAppNumberItem[] = [
   {
     id: 1,
-    label: 'WhatsApp Admisión Pregrado (Chattigo)',
+    label: 'WhatsApp Admisión Pregrado',
     phone_number: '51987654321',
     department: 'Admisión Pregrado',
     default_greeting: 'Hola, quisiera más información en el Instituto y Escuela Superior Continental.',
@@ -98,22 +96,22 @@ const INITIAL_WA_NUMBERS: WhatsAppNumberItem[] = [
 const INITIAL_LINKS: LinkItem[] = [
   {
     id: 1,
-    slug: 'whatsapp-web?subcanal=portal-web&campana=PORTALWEB&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    slug: 'organico?subcanal=portal-web&campana=PRESENCIAL&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
     short_code: 'ic-pw2710',
     short_url: 'https://trace.icontinental.edu.pe/ic-pw2710',
     normal_url:
-      'https://trace.icontinental.edu.pe/whatsapp-web?subcanal=portal-web&campana=PORTALWEB&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
-    title: 'PORTALWEB_202710 - Diseño de Modas',
+      'https://trace.icontinental.edu.pe/organico?subcanal=portal-web&campana=PRESENCIAL&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    title: 'PRESENCIAL_202710 - Diseño de Modas',
     channel: 'web_institucional',
     period: '202710',
-    campaign: 'PORTALWEB',
+    campaign: 'PRESENCIAL',
     career: 'Diseño de Modas',
     subcampaign: 'portal-web',
     destination_type: 'whatsapp',
     destination_url: null,
     whatsapp_phone: '51987654321',
     whatsapp_message:
-      'Hola, vengo de Portal Web, (portal-web), quisiera más información sobre Diseño de Modas, en el Instituto y Escuela Superior Continental. Mi código de atención es PORTALWEB_202710',
+      'Hola, vengo de Orgánico, quisiera más información sobre Diseño de Modas, en el Instituto y Escuela Superior Continental. Mi código de atención es PORTAL-WEB_202710',
     is_master_route: true,
     total_clicks: 418,
     unique_visitors: 365,
@@ -121,22 +119,22 @@ const INITIAL_LINKS: LinkItem[] = [
   },
   {
     id: 2,
-    slug: 'CRM?subcanal=chattigo&campana=NURTURING_CHATTIGO&carrera=Contabilidad&periodo=202710',
-    short_code: 'ic-ch2710',
-    short_url: 'https://trace.icontinental.edu.pe/ic-ch2710',
+    slug: 'nurturing?subcanal=whatsapp&campana=SEMIPRESENCIAL&carrera=Contabilidad&periodo=202710',
+    short_code: 'ic-wa2710',
+    short_url: 'https://trace.icontinental.edu.pe/ic-wa2710',
     normal_url:
-      'https://trace.icontinental.edu.pe/CRM?subcanal=chattigo&campana=NURTURING_CHATTIGO&carrera=Contabilidad&periodo=202710',
-    title: 'NURTURING_CHATTIGO_202710 - Contabilidad',
+      'https://trace.icontinental.edu.pe/nurturing?subcanal=whatsapp&campana=SEMIPRESENCIAL&carrera=Contabilidad&periodo=202710',
+    title: 'SEMIPRESENCIAL_202710 - Contabilidad',
     channel: 'mailing_sms_chattigo',
     period: '202710',
-    campaign: 'NURTURING_CHATTIGO',
+    campaign: 'SEMIPRESENCIAL',
     career: 'Contabilidad',
-    subcampaign: 'chattigo',
+    subcampaign: 'whatsapp',
     destination_type: 'whatsapp',
     destination_url: null,
     whatsapp_phone: '51987654321',
     whatsapp_message:
-      'Hola, vengo de Nurturing, (chattigo), quisiera más información sobre Contabilidad, en el Instituto y Escuela Superior Continental. Mi código de atención es NURTURING_CHATTIGO_202710',
+      'Hola, vengo de Nurturing, quisiera más información sobre Contabilidad, en el Instituto y Escuela Superior Continental. Mi código de atención es WHATSAPP_202710',
     is_master_route: true,
     total_clicks: 420,
     unique_visitors: 378,
@@ -144,59 +142,59 @@ const INITIAL_LINKS: LinkItem[] = [
   },
   {
     id: 3,
-    slug: 'link-ads?subcanal=tiktok-ads&campana=ADMISION_PREGRADO&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    slug: 'pauta?subcanal=tiktok-ads&campana=PRESENCIAL&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
     short_code: 'ic-tt2710',
     short_url: 'https://trace.icontinental.edu.pe/ic-tt2710',
     normal_url:
-      'https://trace.icontinental.edu.pe/link-ads?subcanal=tiktok-ads&campana=ADMISION_PREGRADO&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
-    title: 'ADMISION_PREGRADO_202710 - Diseño de Modas',
+      'https://trace.icontinental.edu.pe/pauta?subcanal=tiktok-ads&campana=PRESENCIAL&carrera=Dise%C3%B1o%20de%20Modas&periodo=202710',
+    title: 'PRESENCIAL_202710 - Diseño de Modas',
     channel: 'link_ads',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'PRESENCIAL',
     career: 'Diseño de Modas',
     subcampaign: 'tiktok-ads',
     destination_type: 'whatsapp',
     destination_url: null,
     whatsapp_phone: '51987654321',
     whatsapp_message:
-      'Hola, vengo de Link Ads, (tiktok-ads), quisiera más información sobre Diseño de Modas, en el Instituto y Escuela Superior Continental. Mi código de atención es ADMISION_PREGRADO_202710',
+      'Hola, vengo de Pauta, quisiera más información sobre Diseño de Modas, en el Instituto y Escuela Superior Continental. Mi código de atención es TIKTOK-ADS_202710',
     total_clicks: 685,
     unique_visitors: 604,
     created_at: '2026-11-05',
   },
   {
     id: 4,
-    slug: 'link-ads?subcanal=google-pmax&campana=ADMISION_PREGRADO&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
+    slug: 'pauta?subcanal=google-pmax&campana=A_DISTANCIA&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
     short_code: 'ic-pm2710',
     short_url: 'https://trace.icontinental.edu.pe/ic-pm2710',
     normal_url:
-      'https://trace.icontinental.edu.pe/link-ads?subcanal=google-pmax&campana=ADMISION_PREGRADO&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
-    title: 'ADMISION_PREGRADO_202710 - Desarrollo de Sistemas de Información',
+      'https://trace.icontinental.edu.pe/pauta?subcanal=google-pmax&campana=A_DISTANCIA&carrera=Desarrollo%20de%20Sistemas%20de%20Informaci%C3%B3n&periodo=202710',
+    title: 'A_DISTANCIA_202710 - Desarrollo de Sistemas de Información',
     channel: 'link_ads',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'A_DISTANCIA',
     career: 'Desarrollo de Sistemas de Información',
     subcampaign: 'google-pmax',
     destination_type: 'whatsapp',
     destination_url: null,
     whatsapp_phone: '51987654322',
     whatsapp_message:
-      'Hola, vengo de Link Ads, (google-pmax), quisiera más información sobre Desarrollo de Sistemas de Información, en el Instituto y Escuela Superior Continental. Mi código de atención es ADMISION_PREGRADO_202710',
+      'Hola, vengo de Pauta, quisiera más información sobre Desarrollo de Sistemas de Información, en el Instituto y Escuela Superior Continental. Mi código de atención es GOOGLE-PMAX_202710',
     total_clicks: 520,
     unique_visitors: 465,
     created_at: '2026-11-08',
   },
   {
     id: 5,
-    slug: 'asesor?subcanal=Gerber&campana=FERIA_COLEGIOS&carrera=Gastronom%C3%ADa&periodo=202710',
+    slug: 'asesor?subcanal=Gerber&campana=EVENTOS&carrera=Gastronom%C3%ADa&periodo=202710',
     short_code: 'ic-ge2710',
     short_url: 'https://trace.icontinental.edu.pe/ic-ge2710',
     normal_url:
-      'https://trace.icontinental.edu.pe/asesor?subcanal=Gerber&campana=FERIA_COLEGIOS&carrera=Gastronom%C3%ADa&periodo=202710',
-    title: 'FERIA_COLEGIOS_202710 - Gastronomía (Gerber)',
+      'https://trace.icontinental.edu.pe/asesor?subcanal=Gerber&campana=EVENTOS&carrera=Gastronom%C3%ADa&periodo=202710',
+    title: 'EVENTOS_202710 - Gastronomía (Gerber)',
     channel: 'asesor_prospector',
     period: '202710',
-    campaign: 'FERIA_COLEGIOS',
+    campaign: 'EVENTOS',
     career: 'Gastronomía',
     subcampaign: 'Gerber',
     advisor_name: 'Gerber',
@@ -204,7 +202,7 @@ const INITIAL_LINKS: LinkItem[] = [
     destination_url: null,
     whatsapp_phone: '51987654321',
     whatsapp_message:
-      'Hola Gerber, vengo de Asesor / Prospector, quisiera más información sobre Gastronomía, en el Instituto y Escuela Superior Continental. Mi código de atención es FERIA_COLEGIOS_202710',
+      'Hola Gerber, vengo de Asesor / Prospector, quisiera más información sobre Gastronomía, en el Instituto y Escuela Superior Continental. Mi código de atención es EVENTOS_202710',
     total_clicks: 530,
     unique_visitors: 472,
     created_at: '2026-11-10',
@@ -212,12 +210,12 @@ const INITIAL_LINKS: LinkItem[] = [
 ];
 
 const INITIAL_RECORDS: SubcampaignRecord[] = [
-  // 1. PORTAL WEB
+  // 1. ORGÁNICO
   {
-    id: 'web_institucional::202710::PORTALWEB::Diseño de Modas::portal-web',
+    id: 'web_institucional::202710::PRESENCIAL::Diseño de Modas::portal-web',
     channel: 'web_institucional',
     period: '202710',
-    campaign: 'PORTALWEB',
+    campaign: 'PRESENCIAL',
     career: 'Diseño de Modas',
     subcampaign: 'portal-web',
     whatsapp_phone: '51987654321',
@@ -227,10 +225,10 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-15',
   },
   {
-    id: 'web_institucional::202710::PORTALWEB::Contabilidad::portal-web',
+    id: 'web_institucional::202710::PRESENCIAL::Contabilidad::portal-web',
     channel: 'web_institucional',
     period: '202710',
-    campaign: 'PORTALWEB',
+    campaign: 'PRESENCIAL',
     career: 'Contabilidad',
     subcampaign: 'portal-web',
     whatsapp_phone: '51987654321',
@@ -240,23 +238,23 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-14',
   },
   {
-    id: 'web_institucional::202710::PORTALWEB::Enfermería Técnica::landing-carreras',
+    id: 'web_institucional::202710::SEMIPRESENCIAL::Enfermería Técnica::landing-page',
     channel: 'web_institucional',
     period: '202710',
-    campaign: 'PORTALWEB',
+    campaign: 'SEMIPRESENCIAL',
     career: 'Enfermería Técnica',
-    subcampaign: 'landing-carreras',
+    subcampaign: 'landing-page',
     whatsapp_phone: '51987654321',
-    short_link: 'trace.icontinental.edu.pe/ic-pw2712',
+    short_link: 'trace.icontinental.edu.pe/ic-lp2712',
     clicks: 356,
     unique_visitors: 310,
     last_activity_date: '2026-11-13',
   },
   {
-    id: 'web_institucional::202710::PORTALWEB::Desarrollo de Sistemas de Información::portal-web',
+    id: 'web_institucional::202710::A_DISTANCIA::Desarrollo de Sistemas de Información::portal-web',
     channel: 'web_institucional',
     period: '202710',
-    campaign: 'PORTALWEB',
+    campaign: 'A_DISTANCIA',
     career: 'Desarrollo de Sistemas de Información',
     subcampaign: 'portal-web',
     whatsapp_phone: '51987654322',
@@ -266,12 +264,12 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-11',
   },
 
-  // 2. LINK ADS
+  // 2. PAUTA
   {
-    id: 'link_ads::202710::ADMISION_PREGRADO::Diseño de Modas::tiktok-ads',
+    id: 'link_ads::202710::PRESENCIAL::Diseño de Modas::tiktok-ads',
     channel: 'link_ads',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'PRESENCIAL',
     career: 'Diseño de Modas',
     subcampaign: 'tiktok-ads',
     whatsapp_phone: '51987654321',
@@ -281,10 +279,10 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-15',
   },
   {
-    id: 'link_ads::202710::ADMISION_PREGRADO::Desarrollo de Sistemas de Información::google-pmax',
+    id: 'link_ads::202710::A_DISTANCIA::Desarrollo de Sistemas de Información::google-pmax',
     channel: 'link_ads',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'A_DISTANCIA',
     career: 'Desarrollo de Sistemas de Información',
     subcampaign: 'google-pmax',
     whatsapp_phone: '51987654322',
@@ -307,10 +305,10 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-12',
   },
   {
-    id: 'link_ads::202720::BECAS_CONTINENTAL::Contabilidad::google-youtube',
+    id: 'link_ads::202720::EVENTOS::Contabilidad::google-youtube',
     channel: 'link_ads',
     period: '202720',
-    campaign: 'BECAS_CONTINENTAL',
+    campaign: 'EVENTOS',
     career: 'Contabilidad',
     subcampaign: 'google-youtube',
     whatsapp_phone: '51987654323',
@@ -322,23 +320,23 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
 
   // 3. NURTURING
   {
-    id: 'mailing_sms_chattigo::202710::NURTURING_CHATTIGO::Contabilidad::chattigo',
+    id: 'mailing_sms_chattigo::202710::SEMIPRESENCIAL::Contabilidad::whatsapp',
     channel: 'mailing_sms_chattigo',
     period: '202710',
-    campaign: 'NURTURING_CHATTIGO',
+    campaign: 'SEMIPRESENCIAL',
     career: 'Contabilidad',
-    subcampaign: 'chattigo',
+    subcampaign: 'whatsapp',
     whatsapp_phone: '51987654321',
-    short_link: 'trace.icontinental.edu.pe/ic-ch2710',
+    short_link: 'trace.icontinental.edu.pe/ic-wa2710',
     clicks: 420,
     unique_visitors: 378,
     last_activity_date: '2026-11-15',
   },
   {
-    id: 'mailing_sms_chattigo::202710::ADMISION_PREGRADO::Enfermería Técnica::sms',
+    id: 'mailing_sms_chattigo::202710::PRESENCIAL::Enfermería Técnica::sms',
     channel: 'mailing_sms_chattigo',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'PRESENCIAL',
     career: 'Enfermería Técnica',
     subcampaign: 'sms',
     whatsapp_phone: '51987654321',
@@ -348,12 +346,12 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-11',
   },
   {
-    id: 'mailing_sms_chattigo::202710::NURTURING_CHATTIGO::Gastronomía::mailing',
+    id: 'mailing_sms_chattigo::202710::EVENTOS::Gastronomía::mail',
     channel: 'mailing_sms_chattigo',
     period: '202710',
-    campaign: 'NURTURING_CHATTIGO',
+    campaign: 'EVENTOS',
     career: 'Gastronomía',
-    subcampaign: 'mailing',
+    subcampaign: 'mail',
     whatsapp_phone: '51987654322',
     short_link: 'trace.icontinental.edu.pe/ic-ml2710',
     clicks: 195,
@@ -363,10 +361,10 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
 
   // 4. ASESOR / PROSPECTOR
   {
-    id: 'asesor_prospector::202710::FERIA_COLEGIOS::Gastronomía::Gerber',
+    id: 'asesor_prospector::202710::EVENTOS::Gastronomía::Gerber',
     channel: 'asesor_prospector',
     period: '202710',
-    campaign: 'FERIA_COLEGIOS',
+    campaign: 'EVENTOS',
     career: 'Gastronomía',
     subcampaign: 'Gerber',
     advisor_name: 'Gerber',
@@ -377,10 +375,10 @@ const INITIAL_RECORDS: SubcampaignRecord[] = [
     last_activity_date: '2026-11-15',
   },
   {
-    id: 'asesor_prospector::202710::ADMISION_PREGRADO::Diseño Gráfico Publicitario::Lucia',
+    id: 'asesor_prospector::202710::PRESENCIAL::Diseño Gráfico Publicitario::Lucia',
     channel: 'asesor_prospector',
     period: '202710',
-    campaign: 'ADMISION_PREGRADO',
+    campaign: 'PRESENCIAL',
     career: 'Diseño Gráfico Publicitario',
     subcampaign: 'Lucia',
     advisor_name: 'Lucia',
@@ -427,9 +425,6 @@ async function fetchWithTimeout(
   }
 }
 
-/**
- * Construye el enlace final con subcanal=, campana=, carrera= y periodo=.
- */
 export function buildSystemTrackingUrl(params: {
   channel: ChannelKey;
   campaign: string;
@@ -438,7 +433,7 @@ export function buildSystemTrackingUrl(params: {
   subchannel: string;
 }): string {
   const baseSlug = CHANNEL_BASE_SLUGS[params.channel];
-  const camp = encodeURIComponent(sanitizeCampaignInput(params.campaign) || 'PORTALWEB');
+  const camp = encodeURIComponent(sanitizeCampaignInput(params.campaign) || 'PRESENCIAL');
   const car = encodeURIComponent(params.career.trim() || 'Diseño de Modas');
   const per = encodeURIComponent(params.period || '202710');
   const sub = encodeURIComponent(params.subchannel.trim() || 'portal-web');
@@ -585,6 +580,47 @@ export class DataEngine {
         ok: false,
         error: 'Usuario o contraseña incorrectos.',
       };
+    }
+  }
+
+  // ===========================================================================
+  // GESTIÓN DE CAMPAÑAS (En Configuración)
+  // ===========================================================================
+  static async createCampaign(rawName: string): Promise<void> {
+    const clean = sanitizeCampaignInput(rawName);
+    if (!clean) return;
+    const list = this.getCampaigns();
+    if (!list.includes(clean)) {
+      saveToStorage(STORAGE_KEYS.CAMPAIGNS, [...list, clean].sort());
+      this.notify();
+    }
+
+    try {
+      await fetchWithTimeout('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: clean }),
+      });
+      await this.syncFromServer();
+    } catch {
+      // ignore offline
+    }
+  }
+
+  static async deleteCampaign(name: string): Promise<void> {
+    const list = this.getCampaigns().filter((c) => c !== name);
+    saveToStorage(STORAGE_KEYS.CAMPAIGNS, list);
+    this.notify();
+
+    try {
+      await fetchWithTimeout('/api/campaigns/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      await this.syncFromServer();
+    } catch {
+      // ignore offline
     }
   }
 
@@ -856,7 +892,7 @@ export class DataEngine {
     const records = this.getRecords();
     const campaigns = this.getCampaigns();
 
-    const cleanCamp = sanitizeCampaignInput(payload.campaign) || 'PORTALWEB';
+    const cleanCamp = sanitizeCampaignInput(payload.campaign) || 'PRESENCIAL';
     if (!campaigns.includes(cleanCamp)) {
       saveToStorage(STORAGE_KEYS.CAMPAIGNS, [...campaigns, cleanCamp].sort());
     }
@@ -1121,8 +1157,11 @@ export class DataEngine {
     };
   }
 
+  /**
+   * Simulador: solo permite añadir conteo a los enlaces ya generados (links).
+   */
   static async simulateTestClick(params: {
-    recordId: string;
+    linkId: number;
     isBot: boolean;
   }): Promise<{ counted: boolean; message: string }> {
     if (params.isBot) {
@@ -1131,43 +1170,79 @@ export class DataEngine {
         message: 'Bot bloqueado por el filtro. No alteró el conteo.',
       };
     }
-    const records = this.getRecords();
-    const idx = records.findIndex((r) => r.id === params.recordId);
-    if (idx !== -1) {
-      const rec = records[idx];
-      rec.clicks += 1;
-      rec.unique_visitors += 1;
-      rec.last_activity_date = new Date().toISOString().slice(0, 10);
-      rec.is_purgeable = true;
-      saveToStorage(STORAGE_KEYS.RECORDS, records);
-      this.notify();
 
-      try {
-        await fetchWithTimeout('/api/simulate-click', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            is_bot: false,
-            channel: rec.channel,
-            period: rec.period,
-            campaign: rec.campaign,
-            career: rec.career,
-            subcampaign: rec.subcampaign,
-            advisor_name: rec.advisor_name,
-            whatsapp_phone: rec.whatsapp_phone,
-            short_link: rec.short_link,
-          }),
-        });
-        await this.syncFromServer();
-      } catch {
-        // ignore offline
-      }
-
-      return {
-        counted: true,
-        message: `+1 clic de prueba sumado en [${rec.campaign}_${rec.period}] → ${rec.career}.`,
-      };
+    const links = this.getLinks();
+    const targetLink = links.find((l) => l.id === params.linkId);
+    if (!targetLink) {
+      return { counted: false, message: 'Selecciona un enlace generado válido.' };
     }
-    return { counted: false, message: 'Selecciona un registro válido.' };
+
+    const today = new Date().toISOString().slice(0, 10);
+    const updatedLinks = links.map((l) =>
+      l.id === targetLink.id
+        ? {
+            ...l,
+            total_clicks: l.total_clicks + 1,
+            unique_visitors: l.unique_visitors + 1,
+          }
+        : l
+    );
+    saveToStorage(STORAGE_KEYS.LINKS, updatedLinks);
+
+    const recKey = `${targetLink.channel}::${targetLink.period}::${targetLink.campaign}::${targetLink.career}::${targetLink.subcampaign}`;
+    const records = this.getRecords();
+    const idx = records.findIndex((r) => r.id === recKey);
+    if (idx !== -1) {
+      records[idx].clicks += 1;
+      records[idx].unique_visitors += 1;
+      records[idx].last_activity_date = today;
+      records[idx].is_purgeable = true;
+      saveToStorage(STORAGE_KEYS.RECORDS, records);
+    } else {
+      const newRec: SubcampaignRecord = {
+        id: recKey,
+        channel: targetLink.channel,
+        period: targetLink.period,
+        campaign: targetLink.campaign,
+        career: targetLink.career,
+        subcampaign: targetLink.subcampaign,
+        advisor_name: targetLink.advisor_name,
+        whatsapp_phone: targetLink.whatsapp_phone,
+        short_link: `trace.icontinental.edu.pe/${targetLink.short_code}`,
+        clicks: 1,
+        unique_visitors: 1,
+        last_activity_date: today,
+        is_purgeable: true,
+      };
+      saveToStorage(STORAGE_KEYS.RECORDS, [newRec, ...records]);
+    }
+    this.notify();
+
+    try {
+      await fetchWithTimeout('/api/simulate-click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_bot: false,
+          link_id: targetLink.id,
+          channel: targetLink.channel,
+          period: targetLink.period,
+          campaign: targetLink.campaign,
+          career: targetLink.career,
+          subcampaign: targetLink.subcampaign,
+          advisor_name: targetLink.advisor_name,
+          whatsapp_phone: targetLink.whatsapp_phone,
+          short_link: `trace.icontinental.edu.pe/${targetLink.short_code}`,
+        }),
+      });
+      await this.syncFromServer();
+    } catch {
+      // ignore offline
+    }
+
+    return {
+      counted: true,
+      message: `+1 clic de prueba sumado al enlace ${targetLink.short_code} (${targetLink.subcampaign} — ${targetLink.career}).`,
+    };
   }
 }

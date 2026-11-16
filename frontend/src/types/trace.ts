@@ -19,7 +19,7 @@ export interface CareerItem {
 export interface SubchannelItem {
   id: number;
   channel: ChannelKey; // Canal padre al que pertenece
-  name: string;        // Ej: "tiktok-ads", "google-pmax", "chattigo", "sms", "portal-web"
+  name: string;        // Ej: "portal-web", "landing-page", "tiktok-ads", "mail", "sms", "whatsapp"
 }
 
 export interface AdvisorItem {
@@ -45,9 +45,9 @@ export interface LinkItem {
   title: string;
   channel: ChannelKey;
   period: string;      // Ej: "202710" (tomado del Periodo Global Activo)
-  campaign: string;    // Ej: "NURTURING_CHATTIGO", "PORTALWEB", "ADMISION_PREGRADO"
+  campaign: string;    // Ej: "PRESENCIAL", "SEMIPRESENCIAL", "A_DISTANCIA", "EVENTOS"
   career: string;      // Ej: "Diseño de Modas", "Contabilidad"
-  subcampaign: string; // Subcanal (ej: "tiktok-ads", "chattigo", "portal-web") o Asesor ("Gerber")
+  subcampaign: string; // Subcanal (ej: "portal-web", "tiktok-ads", "whatsapp") o Asesor ("Gerber")
   advisor_name?: string | null;
   destination_type: 'whatsapp' | 'url';
   destination_url: string | null;
@@ -64,9 +64,9 @@ export interface SubcampaignRecord {
   id: string;
   channel: ChannelKey;
   period: string;         // Ej: "202710"
-  campaign: string;       // Ej: "PORTALWEB", "NURTURING_CHATTIGO"
+  campaign: string;       // Ej: "PRESENCIAL", "SEMIPRESENCIAL", "A_DISTANCIA", "EVENTOS"
   career: string;         // Ej: "Diseño de Modas"
-  subcampaign: string;    // Subcanal ("tiktok-ads", "chattigo", "portal-web") o Asesor ("Gerber")
+  subcampaign: string;    // Subcanal ("portal-web", "tiktok-ads", "whatsapp") o Asesor ("Gerber")
   advisor_name?: string | null;
   whatsapp_phone: string; // Ej: "51987654321"
   short_link: string;
@@ -77,16 +77,16 @@ export interface SubcampaignRecord {
 }
 
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
-  web_institucional: 'Portal Web',
-  link_ads: 'Link Ads',
+  web_institucional: 'Orgánico',
+  link_ads: 'Pauta',
   mailing_sms_chattigo: 'Nurturing',
   asesor_prospector: 'Asesor / Prospector',
 };
 
 export const CHANNEL_BASE_SLUGS: Record<ChannelKey, string> = {
-  web_institucional: 'whatsapp-web',
-  link_ads: 'link-ads',
-  mailing_sms_chattigo: 'CRM',
+  web_institucional: 'organico',
+  link_ads: 'pauta',
+  mailing_sms_chattigo: 'nurturing',
   asesor_prospector: 'asesor',
 };
 
@@ -135,9 +135,31 @@ export function isValidPeriodCode(code: string): boolean {
 }
 
 /**
- * Construye el texto real de WhatsApp cuando se guarda el enlace:
- * - General: "Hola, vengo de [CANAL], ([SUBCANAL]), quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
- * - Asesor/Prospector: "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA]_[PERIODO]"
+ * Construye el código de atención:
+ * - Para Orgánico, Pauta y Nurturing: [SUBCANAL]_[PERIODO] (ej: TIKTOK-ADS_202710, PORTAL-WEB_202710)
+ * - Para Asesor / Prospector: [CAMPAÑA]_[PERIODO]
+ */
+export function buildAttentionCode(params: {
+  channel: ChannelKey;
+  subchannel: string;
+  campaign: string;
+  period: string;
+}): string {
+  const cleanPer = params.period || '202710';
+  if (params.channel === 'asesor_prospector') {
+    const cleanCamp = sanitizeCampaignInput(params.campaign) || 'PRESENCIAL';
+    return `${cleanCamp}_${cleanPer}`;
+  }
+  const cleanSub = (params.subchannel || 'PORTAL-WEB').trim().toUpperCase();
+  return `${cleanSub}_${cleanPer}`;
+}
+
+/**
+ * Construye el texto pre-escrito de WhatsApp:
+ * - En todos menos asesores:
+ *   "Hola, vengo de [CANAL], quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=SUBCANAL+PERIODO]"
+ * - En Asesor / Prospector:
+ *   "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=CAMPAÑA+PERIODO]"
  */
 export function buildDefaultWhatsAppMessage(params: {
   channel: ChannelKey;
@@ -147,18 +169,20 @@ export function buildDefaultWhatsAppMessage(params: {
   subchannel?: string;
   advisorName?: string;
 }): string {
-  const cleanCamp = sanitizeCampaignInput(params.campaign) || 'PORTALWEB';
-  const cleanPer = params.period || '202710';
   const cleanCareer = params.career.trim() || 'Diseño de Modas';
-  const code = `${cleanCamp}_${cleanPer}`;
+  const sub = params.subchannel?.trim() || 'portal-web';
+  const code = buildAttentionCode({
+    channel: params.channel,
+    subchannel: sub,
+    campaign: params.campaign,
+    period: params.period,
+  });
 
   if (params.channel === 'asesor_prospector') {
-    const advisor = params.advisorName?.trim() || params.subchannel?.trim() || 'Gerber';
+    const advisor = params.advisorName?.trim() || sub || 'Gerber';
     return `Hola ${advisor}, vengo de Asesor / Prospector, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
   }
 
   const channelLabel = CHANNEL_LABELS[params.channel];
-  const subchannelLabel = params.subchannel?.trim() || 'general';
-
-  return `Hola, vengo de ${channelLabel}, (${subchannelLabel}), quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+  return `Hola, vengo de ${channelLabel}, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }

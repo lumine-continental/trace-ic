@@ -17,6 +17,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  Megaphone,
   Phone,
   Play,
   Plus,
@@ -33,6 +34,7 @@ import {
 } from 'lucide-react';
 import {
   AdvisorItem,
+  buildAttentionCode,
   buildDefaultWhatsAppMessage,
   CareerItem,
   CHANNEL_LABELS,
@@ -185,7 +187,6 @@ export const App: React.FC = () => {
       return false;
     }
   });
-  // Sin autocompletado inicial en el Login
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -248,14 +249,12 @@ export const App: React.FC = () => {
   const [purgeLoading, setPurgeLoading] = useState<boolean>(false);
 
   // ===========================================================================
-  // GENERADOR DE ENLACES (Canal -> Subcanal jerárquico)
+  // GENERADOR DE ENLACES (Canal -> Subcanal, Campaña desde Configuración)
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
   const [genSubchannel, setGenSubchannel] = useState<string>('tiktok-ads');
   const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
-  const [genCampaignMode, setGenCampaignMode] = useState<'select' | 'new'>('select');
-  const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('ADMISION_PREGRADO');
-  const [genNewCampaignInput, setGenNewCampaignInput] = useState<string>('');
+  const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('PRESENCIAL');
   const [genCareer, setGenCareer] = useState<string>('Diseño de Modas');
 
   const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
@@ -264,15 +263,15 @@ export const App: React.FC = () => {
   const [linkSearch, setLinkSearch] = useState<string>('');
 
   // ===========================================================================
-  // CONFIGURACIÓN (Periodos, Canales y Subcanales, Carreras, Asesores, WhatsApp)
+  // CONFIGURACIÓN (Canales y Subcanales, Campañas, Periodos, Carreras, Asesores, WhatsApp)
   // ===========================================================================
+  const [cfgParentChannel, setCfgParentChannel] = useState<ChannelKey>('link_ads');
+  const [newSubchannelInput, setNewSubchannelInput] = useState<string>('');
+
+  const [newCampaignInput, setNewCampaignInput] = useState<string>('');
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [newCareerInput, setNewCareerInput] = useState<string>('');
-
-  // Gestor jerárquico Canal -> Subcanal
-  const [cfgParentChannel, setCfgParentChannel] = useState<ChannelKey>('link_ads');
-  const [newSubchannelInput, setNewSubchannelInput] = useState<string>('');
 
   const [editingAdvisorId, setEditingAdvisorId] = useState<number | null>(null);
   const [advisorNameInput, setAdvisorNameInput] = useState<string>('');
@@ -288,7 +287,8 @@ export const App: React.FC = () => {
   const [qrPngUrl, setQrPngUrl] = useState<string>('');
   const [qrSvgText, setQrSvgText] = useState<string>('');
 
-  const [simRecordId, setSimRecordId] = useState<string>('');
+  // Simulador: SOLO permite añadir conteo a los enlaces ya generados (links)
+  const [simLinkId, setSimLinkId] = useState<number>(0);
   const [simIsBot, setSimIsBot] = useState<boolean>(false);
   const [simFeedback, setSimFeedback] = useState<string | null>(null);
 
@@ -385,6 +385,9 @@ export const App: React.FC = () => {
     setRecords(loadedRecords);
     setWaNumbers(loadedWa);
 
+    if (loadedCampaigns.length > 0 && !loadedCampaigns.includes(genSelectedCampaign)) {
+      setGenSelectedCampaign(loadedCampaigns[0]);
+    }
     if (loadedCareers.length > 0 && !loadedCareers.some((c) => c.name === genCareer)) {
       setGenCareer(loadedCareers[0].name);
     }
@@ -394,8 +397,8 @@ export const App: React.FC = () => {
     if (loadedLinks.length > 0 && !qrSelectedUrl) {
       setQrSelectedUrl(loadedLinks[0].short_url);
     }
-    if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === simRecordId)) {
-      setSimRecordId(loadedRecords[0].id);
+    if (loadedLinks.length > 0 && !loadedLinks.some((l) => l.id === simLinkId)) {
+      setSimLinkId(loadedLinks[0].id);
     }
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === purgeTargetId)) {
       const firstTest = loadedRecords.find((r) => isTestRecord(r));
@@ -451,7 +454,7 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const target = qrSelectedUrl || 'https://trace.icontinental.edu.pe/whatsapp-web';
+    const target = qrSelectedUrl || 'https://trace.icontinental.edu.pe/organico';
     setQrPngUrl(renderQrPngDataUrl(target, qrColor, 600, 2));
     setQrSvgText(renderQrSvg(target, qrColor, 2));
   }, [qrSelectedUrl, qrColor]);
@@ -507,17 +510,11 @@ export const App: React.FC = () => {
   };
 
   // ===========================================================================
-  // CÁLCULO AL GUARDAR EN EL GENERADOR DE ENLACES
+  // CÁLCULO EN VIVO DEL MENSAJE PRE-GENERADO EN EL GENERADOR DE ENLACES
   // ===========================================================================
-  const effectiveCampaign = useMemo(() => {
-    const raw =
-      genCampaignMode === 'new' ? genNewCampaignInput : genSelectedCampaign;
-    return sanitizeCampaignInput(raw) || 'PORTALWEB';
-  }, [genCampaignMode, genNewCampaignInput, genSelectedCampaign]);
-
   const effectiveSubchannel = useMemo(() => {
     if (genChannel === 'asesor_prospector') return genAdvisorName || 'Gerber';
-    return genSubchannel || 'general';
+    return genSubchannel || 'portal-web';
   }, [genChannel, genSubchannel, genAdvisorName]);
 
   const effectivePhone = useMemo(() => {
@@ -527,6 +524,18 @@ export const App: React.FC = () => {
     }
     return genWaPhone;
   }, [genChannel, genAdvisorName, advisors, genWaPhone]);
+
+  // Sí renderiza el mensaje final en vivo en el Generador
+  const renderedFinalWhatsAppMessage = useMemo(() => {
+    return buildDefaultWhatsAppMessage({
+      channel: genChannel,
+      campaign: genSelectedCampaign,
+      career: genCareer,
+      period: activePeriod,
+      subchannel: effectiveSubchannel,
+      advisorName: genAdvisorName,
+    });
+  }, [genChannel, genSelectedCampaign, genCareer, activePeriod, effectiveSubchannel, genAdvisorName]);
 
   // ===========================================================================
   // AGREGACIONES PARA LAS 6 SECCIONES DE REPORTERÍA
@@ -610,62 +619,7 @@ export const App: React.FC = () => {
     });
   }, [filteredRecords]);
 
-  // 3. Códigos más exitosos (Con columna Subcanal al lado derecho de Canal)
-  const buildCodesRanking = (sourceRows: SubcampaignRecord[]) => {
-    const map = new Map<
-      string,
-      {
-        key: string;
-        code: string;
-        campaign: string;
-        career: string;
-        channelLabel: string;
-        subchannelLabel: string;
-        period: string;
-        clicks: number;
-        unique: number;
-      }
-    >();
-
-    sourceRows.forEach((r) => {
-      const code = `${r.campaign}_${r.period}`;
-      const existing = map.get(code);
-      if (!existing) {
-        map.set(code, {
-          key: code,
-          code,
-          campaign: r.campaign,
-          career: r.career,
-          channelLabel: CHANNEL_LABELS[r.channel],
-          subchannelLabel: r.subcampaign,
-          period: r.period,
-          clicks: r.clicks,
-          unique: r.unique_visitors,
-        });
-      } else {
-        existing.clicks += r.clicks;
-        existing.unique += r.unique_visitors;
-        if (!existing.channelLabel.includes(CHANNEL_LABELS[r.channel])) {
-          existing.channelLabel += `, ${CHANNEL_LABELS[r.channel]}`;
-        }
-        if (!existing.subchannelLabel.includes(r.subcampaign)) {
-          existing.subchannelLabel += `, ${r.subcampaign}`;
-        }
-        if (!existing.career.includes(r.career)) {
-          existing.career += `, ${r.career}`;
-        }
-      }
-    });
-
-    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
-  };
-
-  const resultsByCode = useMemo(
-    () => buildCodesRanking(filteredRecords),
-    [filteredRecords]
-  );
-
-  // 4. Resultados por Carrera (Con columna Subcanal al lado derecho de Canal)
+  // 3. Resultados por Carrera (Puesto #3, Columna mandatoria: Carrera)
   const buildCareersRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
@@ -684,7 +638,12 @@ export const App: React.FC = () => {
 
     sourceRows.forEach((r) => {
       const key = `${r.career}::${r.period}`;
-      const code = `${r.campaign}_${r.period}`;
+      const code = buildAttentionCode({
+        channel: r.channel,
+        subchannel: r.subcampaign,
+        campaign: r.campaign,
+        period: r.period,
+      });
       const existing = map.get(key);
       if (!existing) {
         map.set(key, {
@@ -718,6 +677,49 @@ export const App: React.FC = () => {
 
   const resultsByCareer = useMemo(
     () => buildCareersRanking(filteredRecords),
+    [filteredRecords]
+  );
+
+  // 4. Subcanales más exitosos (Puesto #4, Columna mandatoria: Subcanal, Canal a la derecha, sin Campaña ni Carrera)
+  const buildSubchannelsRanking = (sourceRows: SubcampaignRecord[]) => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        subchannel: string;
+        channelLabel: string;
+        period: string;
+        code: string;
+        clicks: number;
+        unique: number;
+      }
+    >();
+
+    sourceRows.forEach((r) => {
+      const key = `${r.subcampaign}::${r.channel}::${r.period}`;
+      const code = `${r.subcampaign.toUpperCase()}_${r.period}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          key,
+          subchannel: r.subcampaign,
+          channelLabel: CHANNEL_LABELS[r.channel],
+          period: r.period,
+          code,
+          clicks: r.clicks,
+          unique: r.unique_visitors,
+        });
+      } else {
+        existing.clicks += r.clicks;
+        existing.unique += r.unique_visitors;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
+  };
+
+  const resultsBySubchannel = useMemo(
+    () => buildSubchannelsRanking(filteredRecords),
     [filteredRecords]
   );
 
@@ -819,7 +821,12 @@ export const App: React.FC = () => {
       `"${r.subcampaign.replace(/"/g, '""')}"`,
       `"${r.career.replace(/"/g, '""')}"`,
       `"${r.period}"`,
-      `"${r.campaign}_${r.period}"`,
+      `"${buildAttentionCode({
+        channel: r.channel,
+        subchannel: r.subcampaign,
+        campaign: r.campaign,
+        period: r.period,
+      })}"`,
       `"${r.whatsapp_phone}"`,
       r.clicks,
       r.unique_visitors,
@@ -839,33 +846,19 @@ export const App: React.FC = () => {
     e.preventDefault();
     setGenFeedbackMessage(null);
     try {
-      const realMessage = buildDefaultWhatsAppMessage({
-        channel: genChannel,
-        campaign: effectiveCampaign,
-        career: genCareer,
-        period: activePeriod,
-        subchannel: effectiveSubchannel,
-        advisorName: genAdvisorName,
-      });
-
       await DataEngine.createLink({
         channel: genChannel,
         period: activePeriod,
-        campaign: effectiveCampaign,
+        campaign: genSelectedCampaign,
         career: genCareer,
         subcampaign: effectiveSubchannel,
         advisor_name: genChannel === 'asesor_prospector' ? genAdvisorName : undefined,
         whatsapp_phone: effectivePhone,
-        whatsapp_message: realMessage,
+        whatsapp_message: renderedFinalWhatsAppMessage,
         is_purgeable: genIsPurgeable,
       });
 
       setGenFeedbackMessage('Enlace guardado. Cópialo desde la lista de Enlaces Activos.');
-      if (genCampaignMode === 'new') {
-        setGenSelectedCampaign(effectiveCampaign);
-        setGenCampaignMode('select');
-        setGenNewCampaignInput('');
-      }
       refreshLocalState();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Error al registrar el enlace');
@@ -889,7 +882,7 @@ export const App: React.FC = () => {
   };
 
   // ===========================================================================
-  // LOGIN PROTEGIENDO TODA LA APP (Sin autocompletado inicial + Logo IC + Footer)
+  // LOGIN PROTEGIENDO TODA LA APP
   // ===========================================================================
   if (!isAuthenticated) {
     return (
@@ -1021,7 +1014,6 @@ export const App: React.FC = () => {
          ===================================================================== */}
       <header className="bg-white border-b border-ic-border sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Izquierda: Logo Oficial + Navegación */}
           <div className="flex items-center gap-8 h-full">
             <a
               href="/app/"
@@ -1074,7 +1066,6 @@ export const App: React.FC = () => {
             </nav>
           </div>
 
-          {/* Derecha: Periodo Global Activo + Botón Generador de Enlaces */}
           <div className="flex items-center gap-2.5">
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-[#FAFAFA] border border-ic-border text-xs">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
@@ -1259,7 +1250,7 @@ export const App: React.FC = () => {
                       >
                         {records.map((r) => (
                           <option key={r.id} value={r.id}>
-                            [{r.campaign}_{r.period}] {r.career} ({r.subcampaign} — {r.clicks} clics)
+                            [{r.campaign}] {r.career} ({r.subcampaign} — {r.clicks} clics)
                           </option>
                         ))}
                       </select>
@@ -1436,7 +1427,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Selector de PERIODO (Preselect en Activo; Todos abre acordeón) */}
+                {/* Selector de PERIODO */}
                 <div className="flex items-center gap-1.5 bg-white border border-ic-border px-3 py-2 text-xs">
                   <span className="text-ic-muted font-medium">Periodo:</span>
                   <select
@@ -1553,9 +1544,8 @@ export const App: React.FC = () => {
 
             {/* ===============================================================
                 2. DESGLOSE POR CANAL
-                - Ya no imprime Canal sino SUBCANAL
-                - Asesor/Prospector es el único que se ordena por Asesor (Asesor en 1ra columna mandatoria)
-                - En los demás canales la 1ra columna mandatoria es Campaña
+                - Imprime Subcanal en lugar de Canal
+                - Asesor/Prospector se ordena por Asesor
                =============================================================== */}
             <section className="space-y-5">
               <div className="flex items-center gap-3">
@@ -1604,7 +1594,12 @@ export const App: React.FC = () => {
                           </tr>
                         ) : (
                           rows.map((row, idx) => {
-                            const code = `${row.campaign}_${row.period}`;
+                            const code = buildAttentionCode({
+                              channel: row.channel,
+                              subchannel: row.subcampaign,
+                              campaign: row.campaign,
+                              period: row.period,
+                            });
                             return (
                               <tr key={row.id} className="hover:bg-gray-50">
                                 <RankCell index={idx} />
@@ -1727,136 +1722,13 @@ export const App: React.FC = () => {
             </section>
 
             {/* ===============================================================
-                3. CÓDIGOS MÁS EXITOSOS (Con Subcanal al lado derecho de Canal)
+                3. RESULTADOS POR CARRERA (Ahora es el #3)
                =============================================================== */}
             <section className="bg-white border border-ic-border">
               <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
                 <div className="w-1.5 h-5 bg-ic-red" />
                 <h2 className="text-base font-serif font-bold text-ic-dark">
-                  3. Códigos más exitosos
-                </h2>
-              </div>
-
-              {(() => {
-                const renderCodesTable = (items: ReturnType<typeof buildCodesRanking>) => (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
-                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
-                          <th className="py-2.5 px-4 text-ic-dark font-bold">Código</th>
-                          <th className="py-2.5 px-4">Campaña</th>
-                          <th className="py-2.5 px-4">Carrera</th>
-                          <th className="py-2.5 px-4">Canal</th>
-                          <th className="py-2.5 px-4">Subcanal</th>
-                          <th className="py-2.5 px-4">Periodo</th>
-                          <th className="py-2.5 px-4 text-right">Clics</th>
-                          <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-ic-border text-xs">
-                        {items.map((item, idx) => (
-                          <tr key={item.key} className="hover:bg-gray-50">
-                            <RankCell index={idx} />
-                            <td className="py-3 px-4">
-                              <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-xs">
-                                {item.code}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 font-mono font-bold text-ic-dark">
-                              {item.campaign}
-                            </td>
-                            <td className="py-3 px-4 font-medium text-ic-dark">
-                              {item.career}
-                            </td>
-                            <td className="py-3 px-4 text-ic-slate">{item.channelLabel}</td>
-                            <td className="py-3 px-4 font-mono text-ic-slate">
-                              {item.subchannelLabel}
-                            </td>
-                            <td className="py-3 px-4 font-mono text-ic-slate">
-                              {item.period}
-                            </td>
-                            <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
-                              {item.clicks.toLocaleString()}
-                            </td>
-                            <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
-                              {item.unique.toLocaleString()}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-
-                return reportPeriodFilter !== 'all' ? (
-                  renderCodesTable(resultsByCode)
-                ) : (
-                  <div className="divide-y divide-ic-border">
-                    {distinctPeriodsInFilter.map((per) => {
-                      const perItems = buildCodesRanking(
-                        filteredRecords.filter((r) => r.period === per)
-                      );
-                      const perClicks = perItems.reduce((s, i) => s + i.clicks, 0);
-                      const perUnique = perItems.reduce((s, i) => s + i.unique, 0);
-                      const accKey = `codes-${per}`;
-                      const isOpen = openAccordions[accKey] ?? true;
-
-                      return (
-                        <div key={accKey}>
-                          <button
-                            type="button"
-                            onClick={() => toggleAccordion(accKey)}
-                            className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
-                          >
-                            <div className="flex items-center gap-2">
-                              {isOpen ? (
-                                <ChevronDown className="w-4 h-4 text-ic-red" />
-                              ) : (
-                                <ChevronRight className="w-4 h-4 text-ic-muted" />
-                              )}
-                              <span className="text-xs font-semibold uppercase text-ic-muted">
-                                Periodo:
-                              </span>
-                              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
-                                {per}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-4 text-xs tabular-nums">
-                              <span className="font-bold text-ic-dark">
-                                {perClicks.toLocaleString()} clics
-                              </span>
-                              <span className="text-ic-muted">
-                                {perUnique.toLocaleString()} únicos
-                              </span>
-                            </div>
-                          </button>
-                          {isOpen && renderCodesTable(perItems)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
-              <MinimalBarChart
-                title="Comparativa Visual por Código"
-                items={resultsByCode.map((c) => ({
-                  label: c.code,
-                  clicks: c.clicks,
-                  unique: c.unique,
-                }))}
-              />
-            </section>
-
-            {/* ===============================================================
-                4. RESULTADOS POR CARRERA (Con Subcanal al lado derecho de Canal)
-               =============================================================== */}
-            <section className="bg-white border border-ic-border">
-              <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
-                <div className="w-1.5 h-5 bg-ic-red" />
-                <h2 className="text-base font-serif font-bold text-ic-dark">
-                  4. Resultados por Carrera
+                  3. Resultados por Carrera
                 </h2>
               </div>
 
@@ -1969,6 +1841,129 @@ export const App: React.FC = () => {
                   sublabel: c.period,
                   clicks: c.clicks,
                   unique: c.unique,
+                }))}
+              />
+            </section>
+
+            {/* ===============================================================
+                4. SUBCANALES MÁS EXITOSOS (Ahora es el #4)
+                - Columna mandatoria: Subcanal
+                - A la derecha: Canal al cual pertenece
+                - Sin Campaña ni Carrera
+               =============================================================== */}
+            <section className="bg-white border border-ic-border">
+              <div className="px-6 py-4 border-b border-ic-border flex items-center gap-3">
+                <div className="w-1.5 h-5 bg-ic-red" />
+                <h2 className="text-base font-serif font-bold text-ic-dark">
+                  4. Subcanales más exitosos
+                </h2>
+              </div>
+
+              {(() => {
+                const renderSubchannelsTable = (
+                  items: ReturnType<typeof buildSubchannelsRanking>
+                ) => (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ic-border bg-[#FAFAFA] text-[10px] font-semibold uppercase tracking-wider text-ic-muted">
+                          <th className="py-2.5 pl-5 pr-2 w-14">#</th>
+                          <th className="py-2.5 px-4 text-ic-dark font-bold">Subcanal</th>
+                          <th className="py-2.5 px-4">Canal</th>
+                          <th className="py-2.5 px-4">Periodo</th>
+                          <th className="py-2.5 px-4">Código</th>
+                          <th className="py-2.5 px-4 text-right">Clics</th>
+                          <th className="py-2.5 pr-6 pl-4 text-right w-28">Únicos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ic-border text-xs">
+                        {items.map((item, idx) => (
+                          <tr key={item.key} className="hover:bg-gray-50">
+                            <RankCell index={idx} />
+                            <td className="py-3 px-4 font-mono font-bold text-ic-dark">
+                              {item.subchannel}
+                            </td>
+                            <td className="py-3 px-4 text-ic-slate font-medium">
+                              {item.channelLabel}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-ic-slate">
+                              {item.period}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 bg-ic-redSoft text-ic-red font-mono font-bold text-xs">
+                                {item.code}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-ic-dark tabular-nums">
+                              {item.clicks.toLocaleString()}
+                            </td>
+                            <td className="py-3 pr-6 pl-4 text-right text-ic-muted tabular-nums">
+                              {item.unique.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+
+                return reportPeriodFilter !== 'all' ? (
+                  renderSubchannelsTable(resultsBySubchannel)
+                ) : (
+                  <div className="divide-y divide-ic-border">
+                    {distinctPeriodsInFilter.map((per) => {
+                      const perItems = buildSubchannelsRanking(
+                        filteredRecords.filter((r) => r.period === per)
+                      );
+                      const perClicks = perItems.reduce((s, i) => s + i.clicks, 0);
+                      const perUnique = perItems.reduce((s, i) => s + i.unique, 0);
+                      const accKey = `subch-${per}`;
+                      const isOpen = openAccordions[accKey] ?? true;
+
+                      return (
+                        <div key={accKey}>
+                          <button
+                            type="button"
+                            onClick={() => toggleAccordion(accKey)}
+                            className="w-full px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100 flex items-center justify-between text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isOpen ? (
+                                <ChevronDown className="w-4 h-4 text-ic-red" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-ic-muted" />
+                              )}
+                              <span className="text-xs font-semibold uppercase text-ic-muted">
+                                Periodo:
+                              </span>
+                              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white border border-ic-border text-ic-red">
+                                {per}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs tabular-nums">
+                              <span className="font-bold text-ic-dark">
+                                {perClicks.toLocaleString()} clics
+                              </span>
+                              <span className="text-ic-muted">
+                                {perUnique.toLocaleString()} únicos
+                              </span>
+                            </div>
+                          </button>
+                          {isOpen && renderSubchannelsTable(perItems)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              <MinimalBarChart
+                title="Comparativa Visual por Subcanal"
+                items={resultsBySubchannel.map((s) => ({
+                  label: s.subchannel,
+                  sublabel: s.channelLabel,
+                  clicks: s.clicks,
+                  unique: s.unique,
                 }))}
               />
             </section>
@@ -2115,7 +2110,6 @@ export const App: React.FC = () => {
 
         {/* ===================================================================
             MÓDULO 02: GENERADOR DE ENLACES
-            (Esquema de variables sin renderizar y sin botones de copiar antes de guardar)
            =================================================================== */}
         {activeModule === 'generator' && (
           <div className="space-y-6">
@@ -2145,8 +2139,8 @@ export const App: React.FC = () => {
                       onChange={(e) => setGenChannel(e.target.value as ChannelKey)}
                       className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white focus:outline-none focus:border-ic-dark"
                     >
-                      <option value="web_institucional">Portal Web</option>
-                      <option value="link_ads">Link Ads</option>
+                      <option value="web_institucional">Orgánico</option>
+                      <option value="link_ads">Pauta</option>
                       <option value="mailing_sms_chattigo">Nurturing</option>
                       <option value="asesor_prospector">Asesor / Prospector</option>
                     </select>
@@ -2210,7 +2204,7 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 3. CAMPAÑA Y 4. CARRERA + PERIODO INFORMATIVO */}
+                  {/* 3. CAMPAÑA (Creada en Configuración) Y 4. CARRERA + PERIODO INFORMATIVO */}
                   <div className="p-3.5 bg-[#FAFAFA] border border-ic-border space-y-3">
                     <div>
                       <div className="flex items-center justify-between mb-1">
@@ -2219,48 +2213,24 @@ export const App: React.FC = () => {
                         </label>
                         <button
                           type="button"
-                          onClick={() =>
-                            setGenCampaignMode((m) => (m === 'select' ? 'new' : 'select'))
-                          }
-                          className="text-[11px] text-ic-red font-semibold hover:underline"
+                          onClick={() => setActiveModule('tools')}
+                          className="text-[11px] text-ic-red font-medium hover:underline"
                         >
-                          {genCampaignMode === 'select'
-                            ? '+ Nueva campaña'
-                            : 'Elegir existente'}
+                          + Crear Campaña
                         </button>
                       </div>
 
-                      {genCampaignMode === 'select' ? (
-                        <select
-                          value={genSelectedCampaign}
-                          onChange={(e) => setGenSelectedCampaign(e.target.value)}
-                          className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
-                        >
-                          {campaigns.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div>
-                          <input
-                            type="text"
-                            required
-                            maxLength={30}
-                            value={genNewCampaignInput}
-                            onChange={(e) =>
-                              setGenNewCampaignInput(sanitizeCampaignInput(e.target.value))
-                            }
-                            placeholder="EJ: NURTURING_CHATTIGO"
-                            className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white focus:outline-none focus:border-ic-red"
-                          />
-                          <div className="text-[10px] text-ic-muted mt-1 flex justify-between">
-                            <span>Solo MAYÚSCULAS y _</span>
-                            <span className="font-mono">{genNewCampaignInput.length}/30</span>
-                          </div>
-                        </div>
-                      )}
+                      <select
+                        value={genSelectedCampaign}
+                        onChange={(e) => setGenSelectedCampaign(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                      >
+                        {campaigns.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* 4. CARRERA */}
@@ -2321,14 +2291,14 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* ESQUEMA EN FUNCIÓN A VARIABLES (SIN RENDERIZAR VARIABLES NI COPIAR ANTES DE GUARDAR) */}
+                  {/* ESTRUCTURA DE TEXTO PRE-GENERADO (SÍ RENDERIZA EL MENSAJE FINAL) Y ESQUEMA DEL ENLACE */}
                   <div className="p-3.5 bg-[#FAFAFA] border-l-2 border-l-ic-red border border-ic-border space-y-3">
                     <div>
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                        Estructura de Texto Pre-generado:
+                        Estructura de Texto Pre-generado (Mensaje Final):
                       </div>
                       <div className="text-xs text-ic-dark font-mono bg-white p-2.5 border border-ic-border leading-relaxed">
-                        Hola, vengo de [CANAL], ([SUBCANAL]), quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=CAMPAÑA+PERIODO]
+                        {renderedFinalWhatsAppMessage}
                       </div>
                     </div>
 
@@ -2371,7 +2341,7 @@ export const App: React.FC = () => {
                 </form>
               </div>
 
-              {/* LISTA DE ENLACES ACTIVOS (Aquí sí están las opciones de Copiar y Acortado) */}
+              {/* LISTA DE ENLACES ACTIVOS */}
               <div className="lg:col-span-7 bg-white border border-ic-border">
                 <div className="p-4 border-b border-ic-border flex items-center justify-between gap-3">
                   <h2 className="text-base font-serif font-bold text-ic-dark">
@@ -2399,115 +2369,125 @@ export const App: React.FC = () => {
                         l.period.toLowerCase().includes(linkSearch.toLowerCase()) ||
                         l.subcampaign.toLowerCase().includes(linkSearch.toLowerCase())
                     )
-                    .map((link) => (
-                      <div
-                        key={link.id}
-                        className="p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                      >
-                        <div className="space-y-1.5 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] font-semibold uppercase px-2 py-0.5 bg-gray-100 text-ic-dark">
-                              {CHANNEL_LABELS[link.channel]} ({link.subcampaign})
-                            </span>
-                            <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
-                              {link.campaign}_{link.period}
-                            </span>
-                            <span className="text-xs font-semibold text-ic-dark">
-                              {link.career}
-                            </span>
-                            {link.is_purgeable && (
-                              <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
-                                DEPURABLE
+                    .map((link) => {
+                      const codeDisplay = buildAttentionCode({
+                        channel: link.channel,
+                        subchannel: link.subcampaign,
+                        campaign: link.campaign,
+                        period: link.period,
+                      });
+                      return (
+                        <div
+                          key={link.id}
+                          className="p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                        >
+                          <div className="space-y-1.5 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 bg-gray-100 text-ic-dark">
+                                {CHANNEL_LABELS[link.channel]} ({link.subcampaign})
                               </span>
-                            )}
-                          </div>
-
-                          {/* Versión completa del enlace */}
-                          <div className="font-mono text-xs text-ic-dark break-all">
-                            {link.normal_url}
-                          </div>
-
-                          {/* Versión acortada impresa en texto debajo de la completa */}
-                          <div className="font-mono text-xs font-bold text-ic-red flex items-center gap-1.5">
-                            <Scissors className="w-3 h-3" />
-                            <span>{link.short_url}</span>
-                          </div>
-
-                          <div className="text-[11px] text-ic-muted truncate">
-                            {link.whatsapp_message}
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-2 flex-shrink-0">
-                          {/* Columna con Copiar negro arriba y botón rojo Acortado debajo */}
-                          <div className="flex flex-col gap-1.5">
-                            <button
-                              onClick={() => copyToClipboard(link.normal_url, `link-${link.id}`)}
-                              className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
-                            >
-                              {copiedKey === `link-${link.id}` ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5" /> Copiado
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3.5 h-3.5" /> Copiar
-                                </>
+                              <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-ic-redSoft text-ic-red">
+                                {codeDisplay}
+                              </span>
+                              <span className="text-xs font-mono text-ic-slate">
+                                {link.campaign}
+                              </span>
+                              <span className="text-xs font-semibold text-ic-dark">
+                                {link.career}
+                              </span>
+                              {link.is_purgeable && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-50 text-amber-800 border border-amber-200">
+                                  DEPURABLE
+                                </span>
                               )}
-                            </button>
+                            </div>
 
-                            <button
-                              onClick={() =>
-                                copyToClipboard(link.short_url, `short-${link.id}`)
-                              }
-                              className="px-3 py-1.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
-                            >
-                              {copiedKey === `short-${link.id}` ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5" /> Copiado
-                                </>
-                              ) : (
-                                <>
-                                  <Scissors className="w-3.5 h-3.5" /> Acortado
-                                </>
-                              )}
-                            </button>
+                            {/* Versión completa del enlace */}
+                            <div className="font-mono text-xs text-ic-dark break-all">
+                              {link.normal_url}
+                            </div>
+
+                            {/* Versión acortada impresa en texto debajo de la completa */}
+                            <div className="font-mono text-xs font-bold text-ic-red flex items-center gap-1.5">
+                              <Scissors className="w-3 h-3" />
+                              <span>{link.short_url}</span>
+                            </div>
+
+                            <div className="text-[11px] text-ic-muted truncate">
+                              {link.whatsapp_message}
+                            </div>
                           </div>
 
-                          <div className="flex flex-col gap-1.5">
-                            <button
-                              onClick={() => {
-                                setQrSelectedUrl(link.short_url);
-                                setActiveModule('tools');
-                              }}
-                              className="p-1.5 border border-ic-border bg-white hover:text-ic-red"
-                              title="Código QR"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                            </button>
+                          <div className="flex items-start gap-2 flex-shrink-0">
+                            <div className="flex flex-col gap-1.5">
+                              <button
+                                onClick={() => copyToClipboard(link.normal_url, `link-${link.id}`)}
+                                className="px-3 py-1.5 bg-ic-dark hover:bg-black text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
+                              >
+                                {copiedKey === `link-${link.id}` ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" /> Copiado
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" /> Copiar
+                                  </>
+                                )}
+                              </button>
 
-                            {!link.is_master_route && (
                               <button
                                 onClick={() =>
-                                  setConfirmDelete({
-                                    title: '¿Seguro que quieres eliminar este enlace?',
-                                    description: `Se eliminará ${link.campaign}_${link.period} (${link.career}).`,
-                                    onConfirm: async () => {
-                                      await DataEngine.deleteLink(link.id);
-                                      refreshLocalState();
-                                    },
-                                  })
+                                  copyToClipboard(link.short_url, `short-${link.id}`)
                                 }
-                                className="p-1.5 border border-ic-border bg-white text-ic-muted hover:text-ic-red"
-                                title="Eliminar enlace"
+                                className="px-3 py-1.5 bg-ic-red hover:bg-ic-redHover text-white text-xs font-medium flex items-center justify-center gap-1.5 w-28"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                {copiedKey === `short-${link.id}` ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" /> Copiado
+                                  </>
+                                ) : (
+                                  <>
+                                    <Scissors className="w-3.5 h-3.5" /> Acortado
+                                  </>
+                                )}
                               </button>
-                            )}
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setQrSelectedUrl(link.short_url);
+                                  setActiveModule('tools');
+                                }}
+                                className="p-1.5 border border-ic-border bg-white hover:text-ic-red"
+                                title="Código QR"
+                              >
+                                <QrCode className="w-3.5 h-3.5" />
+                              </button>
+
+                              {!link.is_master_route && (
+                                <button
+                                  onClick={() =>
+                                    setConfirmDelete({
+                                      title: '¿Seguro que quieres eliminar este enlace?',
+                                      description: `Se eliminará ${codeDisplay} (${link.career}).`,
+                                      onConfirm: async () => {
+                                        await DataEngine.deleteLink(link.id);
+                                        refreshLocalState();
+                                      },
+                                    })
+                                  }
+                                  className="p-1.5 border border-ic-border bg-white text-ic-muted hover:text-ic-red"
+                                  title="Eliminar enlace"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
             </div>
@@ -2515,7 +2495,8 @@ export const App: React.FC = () => {
         )}
 
         {/* ===================================================================
-            MÓDULO 03: CONFIGURACIÓN (Incluye Gestor Jerárquico Canal -> Subcanal)
+            MÓDULO 03: CONFIGURACIÓN
+            (1. Canales y Subcanales, 2. Campañas, 3. Periodos, 4. Carreras, 5. Asesores, 6. WhatsApp, 7. QR y Simulador)
            =================================================================== */}
         {activeModule === 'tools' && (
           <div className="space-y-8">
@@ -2525,22 +2506,21 @@ export const App: React.FC = () => {
               </h1>
             </div>
 
-            {/* BLOQUE JERÁRQUICO: CANALES Y SUBCANALES */}
+            {/* 1. BLOQUE JERÁRQUICO: CANALES Y SUBCANALES */}
             <section className="bg-white border border-ic-border p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-ic-border pb-3">
                 <div className="flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    1. Jerarquía de Canales y Subcanales
+                    1. Canales y Subcanales (Jerárquico)
                   </h2>
                 </div>
                 <span className="text-xs font-mono text-ic-muted">
-                  Selecciona un Canal existente para crear sus Subcanales
+                  Selecciona un Canal para gestionar sus Subcanales
                 </span>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Selección de Canal Padre */}
                 <div className="lg:col-span-4 space-y-2">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
                     Canales Existentes
@@ -2572,7 +2552,6 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Creación y lista de Subcanales del Canal seleccionado */}
                 <div className="lg:col-span-8 space-y-3">
                   <form
                     onSubmit={async (e) => {
@@ -2592,7 +2571,7 @@ export const App: React.FC = () => {
                       required
                       value={newSubchannelInput}
                       onChange={(e) => setNewSubchannelInput(e.target.value)}
-                      placeholder="Nuevo subcanal (ej: tiktok-ads, google-pmax, chattigo)"
+                      placeholder="Nuevo subcanal (ej: portal-web, landing-page, tiktok-ads, whatsapp)"
                       className="flex-1 px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                     />
                     <button
@@ -2642,14 +2621,165 @@ export const App: React.FC = () => {
               </div>
             </section>
 
+            {/* 2. CREACIÓN DE CAMPAÑAS Y 3. CREACIÓN DE CARRERAS */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* 2. GESTOR DE PERIODOS */}
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <Megaphone className="w-4 h-4 text-ic-red" />
+                    <h2 className="text-base font-serif font-bold text-ic-dark">
+                      2. Creación de Campañas
+                    </h2>
+                  </div>
+                  <span className="text-xs font-mono text-ic-muted">
+                    {campaigns.length} campañas
+                  </span>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!newCampaignInput.trim()) return;
+                    await DataEngine.createCampaign(newCampaignInput);
+                    setNewCampaignInput('');
+                    refreshLocalState();
+                  }}
+                  className="space-y-1.5"
+                >
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      maxLength={30}
+                      value={newCampaignInput}
+                      onChange={(e) =>
+                        setNewCampaignInput(sanitizeCampaignInput(e.target.value))
+                      }
+                      placeholder="EJ: PRESENCIAL, SEMIPRESENCIAL, A_DISTANCIA, EVENTOS"
+                      className="flex-1 px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                    >
+                      Agregar Campaña
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-ic-muted flex justify-between">
+                    <span>Solo MAYÚSCULAS y _ (espacio = _)</span>
+                    <span className="font-mono">{newCampaignInput.length}/30</span>
+                  </div>
+                </form>
+
+                <div className="border border-ic-border divide-y divide-ic-border max-h-64 overflow-y-auto">
+                  {campaigns.map((camp) => (
+                    <div
+                      key={camp}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <span className="font-mono font-bold text-ic-dark">{camp}</span>
+                      {campaigns.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: `¿Seguro que quieres eliminar la campaña "${camp}"?`,
+                              description: 'Se quitará de la lista de campañas disponibles.',
+                              onConfirm: async () => {
+                                await DataEngine.deleteCampaign(camp);
+                                refreshLocalState();
+                              },
+                            })
+                          }
+                          className="p-1 text-ic-muted hover:text-ic-red"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* 3. MÓDULO DE CREACIÓN DE CARRERAS */}
+              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-ic-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-ic-red" />
+                    <h2 className="text-base font-serif font-bold text-ic-dark">
+                      3. Creación de Carreras
+                    </h2>
+                  </div>
+                  <span className="text-xs font-mono text-ic-muted">
+                    {careers.length} carreras
+                  </span>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!newCareerInput.trim()) return;
+                    await DataEngine.createCareer(newCareerInput);
+                    setNewCareerInput('');
+                    refreshLocalState();
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    required
+                    value={newCareerInput}
+                    onChange={(e) => setNewCareerInput(e.target.value)}
+                    placeholder="Nombre de la carrera (Ej: Gastronomía)"
+                    className="flex-1 px-3 py-2 text-xs border border-ic-border bg-white"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
+                  >
+                    Agregar Carrera
+                  </button>
+                </form>
+
+                <div className="border border-ic-border divide-y divide-ic-border max-h-64 overflow-y-auto">
+                  {careers.map((car) => (
+                    <div
+                      key={car.id}
+                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                    >
+                      <span className="font-semibold text-ic-dark">{car.name}</span>
+                      {careers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: `¿Seguro que quieres eliminar la carrera "${car.name}"?`,
+                              description: 'Se quitará de la lista de carreras disponibles.',
+                              onConfirm: async () => {
+                                await DataEngine.deleteCareer(car.id);
+                                refreshLocalState();
+                              },
+                            })
+                          }
+                          className="p-1 text-ic-muted hover:text-ic-red"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            {/* 4. PERIODOS Y 5. ASESORES */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-ic-border pb-3">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-ic-red" />
                     <h2 className="text-base font-serif font-bold text-ic-dark">
-                      2. Periodos (Estado Global)
+                      4. Periodos (Estado Global)
                     </h2>
                   </div>
                   <span className="text-xs font-mono text-ic-red font-bold">
@@ -2762,84 +2892,11 @@ export const App: React.FC = () => {
                 </div>
               </section>
 
-              {/* 3. MÓDULO DE CREACIÓN DE CARRERAS */}
-              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
-                <div className="flex items-center justify-between border-b border-ic-border pb-3">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-ic-red" />
-                    <h2 className="text-base font-serif font-bold text-ic-dark">
-                      3. Creación de Carreras
-                    </h2>
-                  </div>
-                  <span className="text-xs font-mono text-ic-muted">
-                    {careers.length} carreras
-                  </span>
-                </div>
-
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!newCareerInput.trim()) return;
-                    await DataEngine.createCareer(newCareerInput);
-                    setNewCareerInput('');
-                    refreshLocalState();
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    type="text"
-                    required
-                    value={newCareerInput}
-                    onChange={(e) => setNewCareerInput(e.target.value)}
-                    placeholder="Nombre de la carrera (Ej: Gastronomía)"
-                    className="flex-1 px-3 py-2 text-xs border border-ic-border bg-white"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
-                  >
-                    Agregar Carrera
-                  </button>
-                </form>
-
-                <div className="border border-ic-border divide-y divide-ic-border max-h-64 overflow-y-auto">
-                  {careers.map((car) => (
-                    <div
-                      key={car.id}
-                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
-                    >
-                      <span className="font-semibold text-ic-dark">{car.name}</span>
-                      {careers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setConfirmDelete({
-                              title: `¿Seguro que quieres eliminar la carrera "${car.name}"?`,
-                              description: 'Se quitará de la lista de carreras disponibles.',
-                              onConfirm: async () => {
-                                await DataEngine.deleteCareer(car.id);
-                                refreshLocalState();
-                              },
-                            })
-                          }
-                          className="p-1 text-ic-muted hover:text-ic-red"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            {/* 4. ASESORES Y 5. NÚMEROS DE WHATSAPP */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <UserCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    4. Asesores / Prospectores
+                    5. Asesores / Prospectores
                   </h2>
                 </div>
 
@@ -2927,12 +2984,15 @@ export const App: React.FC = () => {
                   ))}
                 </div>
               </section>
+            </div>
 
-              <section className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+            {/* 6. WHATSAPP, 7. CÓDIGO QR Y 8. SIMULADOR (SOLO ENLACES YA GENERADOS) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <section className="lg:col-span-4 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <Phone className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    5. Números de WhatsApp Institucionales
+                    6. Números de WhatsApp
                   </h2>
                 </div>
 
@@ -2952,7 +3012,7 @@ export const App: React.FC = () => {
                     setWaPhoneInput('');
                     refreshLocalState();
                   }}
-                  className="grid grid-cols-1 sm:grid-cols-3 gap-2"
+                  className="space-y-2"
                 >
                   <input
                     type="text"
@@ -2960,35 +3020,37 @@ export const App: React.FC = () => {
                     value={waLabelInput}
                     onChange={(e) => setWaLabelInput(e.target.value)}
                     placeholder="Etiqueta (Ej: Admisión)"
-                    className="px-3 py-2 text-xs border border-ic-border bg-white"
+                    className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
                   />
-                  <input
-                    type="text"
-                    required
-                    value={waPhoneInput}
-                    onChange={(e) => setWaPhoneInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="51987654321"
-                    className="px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-ic-red text-white text-xs font-semibold uppercase tracking-wider"
-                  >
-                    {editingWaId ? 'Actualizar' : 'Guardar'}
-                  </button>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={waPhoneInput}
+                      onChange={(e) => setWaPhoneInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="51987654321"
+                      className="flex-1 px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 py-2 bg-ic-red text-white text-xs font-semibold uppercase"
+                    >
+                      {editingWaId ? 'Actualizar' : 'Guardar'}
+                    </button>
+                  </div>
                 </form>
 
                 <div className="border border-ic-border divide-y divide-ic-border">
                   {waNumbers.map((w) => (
                     <div
                       key={w.id}
-                      className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
+                      className="p-2.5 flex items-center justify-between text-xs hover:bg-gray-50"
                     >
                       <div>
-                        <span className="font-semibold text-ic-dark">{w.label}</span>{' '}
-                        <span className="font-mono font-bold text-ic-red">
+                        <div className="font-semibold text-ic-dark">{w.label}</div>
+                        <div className="font-mono font-bold text-ic-red">
                           +{w.phone_number}
-                        </span>
+                        </div>
                       </div>
                       <div className="inline-flex items-center gap-1.5">
                         <button
@@ -3024,15 +3086,12 @@ export const App: React.FC = () => {
                   ))}
                 </div>
               </section>
-            </div>
 
-            {/* 6. QR Y SIMULADOR */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+              <div className="lg:col-span-4 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <QrCode className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    6. Código QR
+                    7. Código QR
                   </h2>
                 </div>
 
@@ -3043,15 +3102,15 @@ export const App: React.FC = () => {
                 >
                   {links.map((l) => (
                     <option key={l.id} value={l.short_url}>
-                      {l.campaign}_{l.period} — {l.career} ({l.short_code})
+                      {l.subcampaign.toUpperCase()}_{l.period} — {l.career}
                     </option>
                   ))}
                 </select>
 
-                <div className="flex items-center gap-6 p-4 bg-[#FAFAFA] border border-ic-border">
+                <div className="flex items-center gap-4 p-3 bg-[#FAFAFA] border border-ic-border">
                   <div className="bg-white p-2 border border-ic-border">
                     {qrPngUrl && (
-                      <img src={qrPngUrl} alt="QR" className="w-28 h-28 object-contain" />
+                      <img src={qrPngUrl} alt="QR" className="w-24 h-24 object-contain" />
                     )}
                   </div>
                   <div className="flex-1 space-y-2">
@@ -3059,14 +3118,14 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setQrColor('#111827')}
-                        className="px-2.5 py-1 text-xs border border-ic-border bg-white"
+                        className="px-2 py-1 text-xs border border-ic-border bg-white"
                       >
                         Negro
                       </button>
                       <button
                         type="button"
                         onClick={() => setQrColor('#E4000B')}
-                        className="px-2.5 py-1 text-xs border border-ic-red text-ic-red bg-white"
+                        className="px-2 py-1 text-xs border border-ic-red text-ic-red bg-white"
                       >
                         Rojo IC
                       </button>
@@ -3092,25 +3151,31 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="lg:col-span-6 bg-white border border-ic-border p-6 space-y-4">
+              {/* SIMULADOR Y DEPURADOR DE PRUEBAS (Solo permite añadir conteo a los enlaces ya generados) */}
+              <div className="lg:col-span-4 bg-white border border-ic-border p-6 space-y-4">
                 <div className="flex items-center gap-2 border-b border-ic-border pb-3">
                   <ShieldCheck className="w-4 h-4 text-ic-red" />
                   <h2 className="text-base font-serif font-bold text-ic-dark">
-                    7. Simulador y Depurador de Pruebas
+                    8. Simulador y Depurador de Pruebas
                   </h2>
                 </div>
 
-                <select
-                  value={simRecordId}
-                  onChange={(e) => setSimRecordId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
-                >
-                  {records.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      [{r.campaign}_{r.period}] {r.career} ({r.subcampaign})
-                    </option>
-                  ))}
-                </select>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                    Enlace Generado Activo
+                  </label>
+                  <select
+                    value={simLinkId}
+                    onChange={(e) => setSimLinkId(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                  >
+                    {links.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        [{l.short_code}] {CHANNEL_LABELS[l.channel]} ({l.subcampaign}) — {l.career}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <select
                   value={simIsBot ? 'bot' : 'human'}
@@ -3124,15 +3189,16 @@ export const App: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
+                    disabled={links.length === 0}
                     onClick={async () => {
                       const res = await DataEngine.simulateTestClick({
-                        recordId: simRecordId,
+                        linkId: simLinkId,
                         isBot: simIsBot,
                       });
                       setSimFeedback(res.message);
                       refreshLocalState();
                     }}
-                    className="py-2 bg-ic-dark text-white text-xs font-semibold uppercase flex items-center justify-center gap-1.5"
+                    className="py-2 bg-ic-dark disabled:opacity-50 text-white text-xs font-semibold uppercase flex items-center justify-center gap-1.5"
                   >
                     <Play className="w-3.5 h-3.5" /> Simular
                   </button>
