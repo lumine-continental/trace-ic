@@ -79,7 +79,7 @@ export interface SubcampaignRecord {
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   web_institucional: 'Orgánico',
   link_ads: 'Pauta',
-  mailing_sms_chattigo: 'Nurturing',
+  mailing_sms_chattigo: 'Nurturing (mixto)',
   asesor_prospector: 'Asesor / Prospector',
 };
 

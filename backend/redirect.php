@@ -162,10 +162,36 @@ try {
     $channelNames = [
         'web_institucional'    => 'Orgánico',
         'link_ads'             => 'Pauta',
-        'mailing_sms_chattigo' => 'Nurturing',
+        'mailing_sms_chattigo' => 'Nurturing (mixto)',
         'asesor_prospector'    => 'Asesor / Prospector',
     ];
     $channelDisplay = $channelNames[$link['channel']] ?? 'Orgánico';
+
+    // Si entró por la ruta larga (?subcanal=...&campana=...&carrera=...), buscar el enlace exacto en links para tomar su ID y teléfono
+    if ($paramUtm !== '' || $paramCampaign !== '' || $paramCareer !== '') {
+        try {
+            $matchStmt = $pdo->prepare('
+                SELECT * FROM links
+                WHERE channel = :ch
+                  AND LOWER(subcampaign) = LOWER(:sub)
+                  AND LOWER(campaign) = LOWER(:camp)
+                  AND LOWER(career) = LOWER(:car)
+                ORDER BY id DESC LIMIT 1
+            ');
+            $matchStmt->execute([
+                'ch'   => $link['channel'],
+                'sub'  => $finalSubcampaign,
+                'camp' => $finalCampaign,
+                'car'  => $finalCareer,
+            ]);
+            $matchedLink = $matchStmt->fetch();
+            if ($matchedLink) {
+                $link = $matchedLink;
+            }
+        } catch (\Throwable $e) {
+            // Ignorar
+        }
+    }
 
     $phone = $paramPhone !== '' ? $paramPhone : preg_replace('/\D/', '', (string) ($link['whatsapp_phone'] ?: '51987654321'));
     $advisorName = null;

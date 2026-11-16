@@ -34,17 +34,7 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
 
-        if ((int) $pdo->query("SELECT COUNT(*) FROM `periods`")->fetchColumn() === 0) {
-            $pdo->exec("
-                INSERT IGNORE INTO `periods` (`code`, `is_active`) VALUES
-                ('202610', 0),
-                ('202620', 0),
-                ('202710', 1),
-                ('202720', 0)
-            ");
-        }
-
-        // 2. Tabla de Campañas (MAYÚSCULAS_CON_GUION_BAJO)
+        // 2. Tabla de Campañas
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS `campaigns` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -55,26 +45,7 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
 
-        if ((int) $pdo->query("SELECT COUNT(*) FROM `campaigns`")->fetchColumn() === 0) {
-            $pdo->exec("
-                INSERT IGNORE INTO `campaigns` (`name`) VALUES
-                ('PRESENCIAL'),
-                ('SEMIPRESENCIAL'),
-                ('A_DISTANCIA'),
-                ('EVENTOS')
-            ");
-        } else {
-            $pdo->exec("
-                INSERT IGNORE INTO `campaigns` (`name`) VALUES
-                ('PRESENCIAL'),
-                ('SEMIPRESENCIAL'),
-                ('A_DISTANCIA'),
-                ('EVENTOS')
-            ");
-            $pdo->exec("DELETE FROM `campaigns` WHERE `name` IN ('PORTALWEB', 'NURTURING_CHATTIGO', 'ADMISION_PREGRADO')");
-        }
-
-        // 3. Tabla de Carreras (Nueva entidad configurable)
+        // 3. Tabla de Carreras
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS `careers` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -84,20 +55,6 @@ function ensureSchemaUpgrades(\PDO $pdo): void
                 UNIQUE KEY `uk_career_name` (`name`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
-
-        if ((int) $pdo->query("SELECT COUNT(*) FROM `careers`")->fetchColumn() === 0) {
-            $pdo->exec("
-                INSERT IGNORE INTO `careers` (`name`) VALUES
-                ('Diseño de Modas'),
-                ('Contabilidad'),
-                ('Enfermería Técnica'),
-                ('Desarrollo de Sistemas de Información'),
-                ('Administración de Empresas'),
-                ('Diseño Gráfico Publicitario'),
-                ('Gastronomía'),
-                ('Información General de Carreras')
-            ");
-        }
 
         // 4. Tabla de Asesores / Prospectores
         $pdo->exec("
@@ -111,15 +68,7 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
 
-        if ((int) $pdo->query("SELECT COUNT(*) FROM `advisors`")->fetchColumn() === 0) {
-            $pdo->exec("
-                INSERT INTO `advisors` (`name`, `phone_number`, `is_active`) VALUES
-                ('Gerber', '51987654321', 1),
-                ('Lucia', '51987654322', 1)
-            ");
-        }
-
-        // 4b. Tabla de Subcanales (Jerárquica: cada subcanal pertenece a un canal existente)
+        // 4b. Tabla de Subcanales
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS `subchannels` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -131,52 +80,19 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
 
-        if ((int) $pdo->query("SELECT COUNT(*) FROM `subchannels`")->fetchColumn() === 0) {
-            $pdo->exec("
-                INSERT IGNORE INTO `subchannels` (`channel`, `name`) VALUES
-                ('web_institucional', 'portal-web'),
-                ('web_institucional', 'landing-page'),
-                ('link_ads', 'tiktok-ads'),
-                ('link_ads', 'google-search'),
-                ('link_ads', 'google-display'),
-                ('link_ads', 'google-pmax'),
-                ('link_ads', 'google-youtube'),
-                ('link_ads', 'linkedin-ads'),
-                ('mailing_sms_chattigo', 'mail'),
-                ('mailing_sms_chattigo', 'sms'),
-                ('mailing_sms_chattigo', 'whatsapp')
-            ");
-        } else {
-            $pdo->exec("DELETE FROM `subchannels` WHERE `name` IN ('chattigo', 'mailing', 'landing-carreras')");
-            $pdo->exec("
-                INSERT IGNORE INTO `subchannels` (`channel`, `name`) VALUES
-                ('web_institucional', 'portal-web'),
-                ('web_institucional', 'landing-page'),
-                ('mailing_sms_chattigo', 'mail'),
-                ('mailing_sms_chattigo', 'sms'),
-                ('mailing_sms_chattigo', 'whatsapp')
-            ");
-        }
-
-        // 5. Asegurar columnas en `links`
+        // 5. Asegurar columnas en `links` y `click_events`
         $pdo->exec("ALTER TABLE `links` MODIFY COLUMN `channel` VARCHAR(50) NOT NULL DEFAULT 'mailing_sms_chattigo'");
         $pdo->exec("ALTER TABLE `click_events` MODIFY COLUMN `channel` VARCHAR(50) NOT NULL DEFAULT 'mailing_sms_chattigo'");
-
-        $pdo->exec("UPDATE `links` SET `channel` = 'link_ads' WHERE `channel` = 'tiktok_ads'");
-        $pdo->exec("UPDATE `links` SET `channel` = 'asesor_prospector' WHERE `channel` = 'landing_page'");
-        $pdo->exec("UPDATE `click_events` SET `channel` = 'link_ads' WHERE `channel` = 'tiktok_ads'");
-        $pdo->exec("UPDATE `click_events` SET `channel` = 'asesor_prospector' WHERE `channel` = 'landing_page'");
 
         $colsLinks = $pdo->query("SHOW COLUMNS FROM `links`")->fetchAll(\PDO::FETCH_COLUMN);
         if (!in_array('is_purgeable', $colsLinks, true)) {
             $pdo->exec("ALTER TABLE `links` ADD COLUMN `is_purgeable` TINYINT(1) NOT NULL DEFAULT 0");
         }
         if (!in_array('period', $colsLinks, true)) {
-            $pdo->exec("ALTER TABLE `links` ADD COLUMN `period` VARCHAR(10) NOT NULL DEFAULT '202710'");
-            $pdo->exec("UPDATE `links` SET `period` = '202710' WHERE `period` = '' OR `period` IS NULL");
+            $pdo->exec("ALTER TABLE `links` ADD COLUMN `period` VARCHAR(10) NOT NULL DEFAULT ''");
         }
         if (!in_array('career', $colsLinks, true)) {
-            $pdo->exec("ALTER TABLE `links` ADD COLUMN `career` VARCHAR(140) NOT NULL DEFAULT 'Diseño de Modas'");
+            $pdo->exec("ALTER TABLE `links` ADD COLUMN `career` VARCHAR(140) NOT NULL DEFAULT ''");
         }
         if (!in_array('advisor_name', $colsLinks, true)) {
             $pdo->exec("ALTER TABLE `links` ADD COLUMN `advisor_name` VARCHAR(100) NULL DEFAULT NULL");
@@ -185,41 +101,65 @@ function ensureSchemaUpgrades(\PDO $pdo): void
             $pdo->exec("ALTER TABLE `links` ADD COLUMN `short_code` VARCHAR(32) NULL DEFAULT NULL");
         }
 
-        // 6. Asegurar columnas en `click_events`
         $colsEvents = $pdo->query("SHOW COLUMNS FROM `click_events`")->fetchAll(\PDO::FETCH_COLUMN);
         if (!in_array('is_purgeable', $colsEvents, true)) {
             $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `is_purgeable` TINYINT(1) NOT NULL DEFAULT 0");
         }
         if (!in_array('period', $colsEvents, true)) {
-            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `period` VARCHAR(10) NOT NULL DEFAULT '202710'");
+            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `period` VARCHAR(10) NOT NULL DEFAULT ''");
         }
         if (!in_array('career', $colsEvents, true)) {
-            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `career` VARCHAR(140) NOT NULL DEFAULT 'Diseño de Modas'");
-            // Si en web_institucional subcampaign tenía el nombre de carrera, copiarlo a career
-            $pdo->exec("UPDATE `click_events` SET `career` = `subcampaign` WHERE `channel` = 'web_institucional'");
+            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `career` VARCHAR(140) NOT NULL DEFAULT ''");
         }
         if (!in_array('advisor_name', $colsEvents, true)) {
             $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `advisor_name` VARCHAR(100) NULL DEFAULT NULL");
-            $pdo->exec("UPDATE `click_events` SET `advisor_name` = `subcampaign` WHERE `channel` = 'asesor_prospector'");
         }
         if (!in_array('whatsapp_phone', $colsEvents, true)) {
-            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `whatsapp_phone` VARCHAR(25) NOT NULL DEFAULT '51987654321'");
+            $pdo->exec("ALTER TABLE `click_events` ADD COLUMN `whatsapp_phone` VARCHAR(25) NOT NULL DEFAULT ''");
         }
 
-        // Normalizar campañas antiguas que tenían códigos de periodo (202710)
-        $pdo->exec("UPDATE `links` SET `campaign` = 'PORTALWEB' WHERE `campaign` REGEXP '^20[2-3][0-9]' AND `channel` = 'web_institucional'");
-        $pdo->exec("UPDATE `links` SET `campaign` = 'NURTURING_CHATTIGO' WHERE `campaign` REGEXP '^20[2-3][0-9]' AND `channel` = 'mailing_sms_chattigo'");
-        $pdo->exec("UPDATE `links` SET `campaign` = 'ADMISION_PREGRADO' WHERE `campaign` REGEXP '^20[2-3][0-9]'");
-        $pdo->exec("UPDATE `click_events` SET `campaign` = 'PORTALWEB' WHERE `campaign` REGEXP '^20[2-3][0-9]' AND `channel` = 'web_institucional'");
-        $pdo->exec("UPDATE `click_events` SET `campaign` = 'NURTURING_CHATTIGO' WHERE `campaign` REGEXP '^20[2-3][0-9]' AND `channel` = 'mailing_sms_chattigo'");
-        $pdo->exec("UPDATE `click_events` SET `campaign` = 'ADMISION_PREGRADO' WHERE `campaign` REGEXP '^20[2-3][0-9]'");
-
+        // 6. Migración única a Producción en Cero (Solo deja las 14 carreras oficiales y vacía lo demás)
         $pdo->exec("
-            UPDATE `click_events`
-            SET `is_purgeable` = 1
-            WHERE `is_purgeable` = 0
-              AND LOWER(`subcampaign`) REGEXP 'prueba|test|demo|simulaci'
+            CREATE TABLE IF NOT EXISTS `system_migrations` (
+                `version` VARCHAR(60) NOT NULL,
+                `applied_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`version`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
+
+        $hasZeroReset = $pdo->query("SELECT COUNT(*) FROM `system_migrations` WHERE `version` = 'v1_production_zero_reset'")->fetchColumn();
+        if ((int) $hasZeroReset === 0) {
+            $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+            $pdo->exec("TRUNCATE TABLE `click_events`");
+            $pdo->exec("TRUNCATE TABLE `links`");
+            $pdo->exec("TRUNCATE TABLE `whatsapp_numbers`");
+            $pdo->exec("TRUNCATE TABLE `advisors`");
+            $pdo->exec("TRUNCATE TABLE `campaigns`");
+            $pdo->exec("TRUNCATE TABLE `subchannels`");
+            $pdo->exec("TRUNCATE TABLE `periods`");
+            $pdo->exec("TRUNCATE TABLE `careers`");
+            $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+
+            $pdo->exec("
+                INSERT INTO `careers` (`name`) VALUES
+                ('Administración de Empresas'),
+                ('Administración de Negocios Internacionales'),
+                ('Administración de Negocios Bancarios y Financieros'),
+                ('Contabilidad'),
+                ('Ciencia de Datos e Inteligencia Artificial'),
+                ('Desarrollo de Sistemas de Información'),
+                ('Gestión de la Construcción'),
+                ('Diseño Gráfico Publicitario'),
+                ('Diseño de Modas'),
+                ('Diseño de Interiores'),
+                ('Marketing'),
+                ('Gastronomía'),
+                ('Enfermería Técnica'),
+                ('Farmacia Técnica')
+            ");
+
+            $pdo->exec("INSERT INTO `system_migrations` (`version`) VALUES ('v1_production_zero_reset')");
+        }
     } catch (\Throwable $e) {
         error_log('[TraceIC AutoMigrate] ' . $e->getMessage());
     }

@@ -196,7 +196,7 @@ export const App: React.FC = () => {
 
   // Estado sincronizado
   const [periods, setPeriods] = useState<PeriodItem[]>([]);
-  const [activePeriod, setActivePeriod] = useState<string>('202710');
+  const [activePeriod, setActivePeriod] = useState<string>('');
   const [campaigns, setCampaigns] = useState<string[]>([]);
   const [careers, setCareers] = useState<CareerItem[]>([]);
   const [subchannels, setSubchannels] = useState<SubchannelItem[]>([]);
@@ -218,7 +218,7 @@ export const App: React.FC = () => {
   const dateDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Preselect en el Periodo Activo Global (cuando es 'all' muestra acordeones por periodo)
-  const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('202710');
+  const [reportPeriodFilter, setReportPeriodFilter] = useState<string>('all');
   const [hasInitializedPeriodFilter, setHasInitializedPeriodFilter] = useState<boolean>(false);
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({});
   const [highlightedChannel, setHighlightedChannel] = useState<ChannelKey | null>(null);
@@ -252,12 +252,12 @@ export const App: React.FC = () => {
   // GENERADOR DE ENLACES (Canal -> Subcanal, Campaña desde Configuración)
   // ===========================================================================
   const [genChannel, setGenChannel] = useState<ChannelKey>('link_ads');
-  const [genSubchannel, setGenSubchannel] = useState<string>('tiktok-ads');
-  const [genAdvisorName, setGenAdvisorName] = useState<string>('Gerber');
-  const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('PRESENCIAL');
-  const [genCareer, setGenCareer] = useState<string>('Diseño de Modas');
+  const [genSubchannel, setGenSubchannel] = useState<string>('');
+  const [genAdvisorName, setGenAdvisorName] = useState<string>('');
+  const [genSelectedCampaign, setGenSelectedCampaign] = useState<string>('');
+  const [genCareer, setGenCareer] = useState<string>('Administración de Empresas');
 
-  const [genWaPhone, setGenWaPhone] = useState<string>('51987654321');
+  const [genWaPhone, setGenWaPhone] = useState<string>('');
   const [genIsPurgeable, setGenIsPurgeable] = useState<boolean>(false);
   const [genFeedbackMessage, setGenFeedbackMessage] = useState<string | null>(null);
   const [linkSearch, setLinkSearch] = useState<string>('');
@@ -374,8 +374,10 @@ export const App: React.FC = () => {
     setPeriods(loadedPeriods);
     setActivePeriod(currentActivePeriod);
     if (!hasInitializedPeriodFilter) {
-      setReportPeriodFilter(currentActivePeriod);
-      setHasInitializedPeriodFilter(true);
+      setReportPeriodFilter(currentActivePeriod || 'all');
+      if (currentActivePeriod) {
+        setHasInitializedPeriodFilter(true);
+      }
     }
     setCampaigns(loadedCampaigns);
     setCareers(loadedCareers);
@@ -387,18 +389,32 @@ export const App: React.FC = () => {
 
     if (loadedCampaigns.length > 0 && !loadedCampaigns.includes(genSelectedCampaign)) {
       setGenSelectedCampaign(loadedCampaigns[0]);
+    } else if (loadedCampaigns.length === 0) {
+      setGenSelectedCampaign('');
     }
     if (loadedCareers.length > 0 && !loadedCareers.some((c) => c.name === genCareer)) {
       setGenCareer(loadedCareers[0].name);
     }
     if (loadedAdvisors.length > 0 && !loadedAdvisors.some((a) => a.name === genAdvisorName)) {
       setGenAdvisorName(loadedAdvisors[0].name);
+    } else if (loadedAdvisors.length === 0) {
+      setGenAdvisorName('');
     }
-    if (loadedLinks.length > 0 && !qrSelectedUrl) {
-      setQrSelectedUrl(loadedLinks[0].short_url);
+    if (loadedWa.length > 0 && !loadedWa.some((w) => w.phone_number === genWaPhone)) {
+      setGenWaPhone(loadedWa[0].phone_number);
+    } else if (loadedWa.length === 0) {
+      setGenWaPhone('');
     }
-    if (loadedLinks.length > 0 && !loadedLinks.some((l) => l.id === simLinkId)) {
-      setSimLinkId(loadedLinks[0].id);
+    if (loadedLinks.length > 0) {
+      if (!loadedLinks.some((l) => l.short_url === qrSelectedUrl)) {
+        setQrSelectedUrl(loadedLinks[0].short_url);
+      }
+      if (!loadedLinks.some((l) => l.id === simLinkId)) {
+        setSimLinkId(loadedLinks[0].id);
+      }
+    } else {
+      setQrSelectedUrl('');
+      setSimLinkId(0);
     }
     if (loadedRecords.length > 0 && !loadedRecords.some((r) => r.id === purgeTargetId)) {
       const firstTest = loadedRecords.find((r) => isTestRecord(r));
@@ -431,10 +447,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (genChannel !== 'asesor_prospector') {
-      if (
-        availableSubchannelsForGen.length > 0 &&
-        !availableSubchannelsForGen.some((s) => s.name === genSubchannel)
-      ) {
+      if (availableSubchannelsForGen.length === 0) {
+        setGenSubchannel('');
+      } else if (!availableSubchannelsForGen.some((s) => s.name === genSubchannel)) {
         setGenSubchannel(availableSubchannelsForGen[0].name);
       }
     }
@@ -680,7 +695,7 @@ export const App: React.FC = () => {
     [filteredRecords]
   );
 
-  // 4. Subcanales más exitosos (Puesto #4, Columna mandatoria: Subcanal, Canal a la derecha, sin Campaña ni Carrera)
+  // 4. Subcanales más exitosos (Puesto #4, Columna mandatoria: Subcanal, Canal a la derecha, sin Campaña ni Carrera, no cuenta Asesores)
   const buildSubchannelsRanking = (sourceRows: SubcampaignRecord[]) => {
     const map = new Map<
       string,
@@ -695,25 +710,27 @@ export const App: React.FC = () => {
       }
     >();
 
-    sourceRows.forEach((r) => {
-      const key = `${r.subcampaign}::${r.channel}::${r.period}`;
-      const code = `${r.subcampaign.toUpperCase()}_${r.period}`;
-      const existing = map.get(key);
-      if (!existing) {
-        map.set(key, {
-          key,
-          subchannel: r.subcampaign,
-          channelLabel: CHANNEL_LABELS[r.channel],
-          period: r.period,
-          code,
-          clicks: r.clicks,
-          unique: r.unique_visitors,
-        });
-      } else {
-        existing.clicks += r.clicks;
-        existing.unique += r.unique_visitors;
-      }
-    });
+    sourceRows
+      .filter((r) => r.channel !== 'asesor_prospector')
+      .forEach((r) => {
+        const key = `${r.subcampaign}::${r.channel}::${r.period}`;
+        const code = `${r.subcampaign.toUpperCase()}_${r.period}`;
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, {
+            key,
+            subchannel: r.subcampaign,
+            channelLabel: CHANNEL_LABELS[r.channel],
+            period: r.period,
+            code,
+            clicks: r.clicks,
+            unique: r.unique_visitors,
+          });
+        } else {
+          existing.clicks += r.clicks;
+          existing.unique += r.unique_visitors;
+        }
+      });
 
     return Array.from(map.values()).sort((a, b) => b.clicks - a.clicks);
   };
@@ -842,9 +859,46 @@ export const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Array compartido de opciones de enlaces generados para 7. Código QR y 8. Simulador de Pruebas
+  const generatedLinkOptions = useMemo(
+    () =>
+      links.map((l) => ({
+        id: l.id,
+        short_url: l.short_url,
+        label: `[${l.short_code}] ${CHANNEL_LABELS[l.channel]} (${l.subcampaign}) — ${l.career}`,
+      })),
+    [links]
+  );
+
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setGenFeedbackMessage(null);
+
+    if (!activePeriod) {
+      alert('Primero crea y activa un Periodo en Configuración.');
+      return;
+    }
+    if (genChannel === 'asesor_prospector' && !genAdvisorName) {
+      alert('Primero crea un Asesor en Configuración.');
+      return;
+    }
+    if (genChannel !== 'asesor_prospector' && !genSubchannel) {
+      alert('Primero crea un Subcanal para este canal en Configuración.');
+      return;
+    }
+    if (!genSelectedCampaign) {
+      alert('Primero crea una Campaña en Configuración.');
+      return;
+    }
+    if (!genCareer) {
+      alert('Selecciona una Carrera.');
+      return;
+    }
+    if (!effectivePhone) {
+      alert('Primero registra un Número de WhatsApp en Configuración.');
+      return;
+    }
+
     try {
       await DataEngine.createLink({
         channel: genChannel,
@@ -2120,7 +2174,7 @@ export const App: React.FC = () => {
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-ic-muted">Periodo Activo Global:</span>
                 <span className="px-2.5 py-1 bg-ic-red text-white font-mono font-bold">
-                  {activePeriod}
+                  {activePeriod || 'Sin definir'}
                 </span>
               </div>
             </div>
@@ -2141,7 +2195,7 @@ export const App: React.FC = () => {
                     >
                       <option value="web_institucional">Orgánico</option>
                       <option value="link_ads">Pauta</option>
-                      <option value="mailing_sms_chattigo">Nurturing</option>
+                      <option value="mailing_sms_chattigo">Nurturing (mixto)</option>
                       <option value="asesor_prospector">Asesor / Prospector</option>
                     </select>
                   </div>
@@ -2169,11 +2223,15 @@ export const App: React.FC = () => {
                         onChange={(e) => setGenSubchannel(e.target.value)}
                         className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                       >
-                        {availableSubchannelsForGen.map((s) => (
-                          <option key={s.id} value={s.name}>
-                            {s.name}
-                          </option>
-                        ))}
+                        {availableSubchannelsForGen.length === 0 ? (
+                          <option value="">— Crear subcanal en Configuración —</option>
+                        ) : (
+                          availableSubchannelsForGen.map((s) => (
+                            <option key={s.id} value={s.name}>
+                              {s.name}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   ) : (
@@ -2195,11 +2253,15 @@ export const App: React.FC = () => {
                         onChange={(e) => setGenAdvisorName(e.target.value)}
                         className="w-full px-3 py-2 text-xs font-semibold border border-ic-border bg-white"
                       >
-                        {advisors.map((adv) => (
-                          <option key={adv.id} value={adv.name}>
-                            {adv.name} (+{adv.phone_number})
-                          </option>
-                        ))}
+                        {advisors.length === 0 ? (
+                          <option value="">— Crear asesor en Configuración —</option>
+                        ) : (
+                          advisors.map((adv) => (
+                            <option key={adv.id} value={adv.name}>
+                              {adv.name} (+{adv.phone_number})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   )}
@@ -2225,11 +2287,15 @@ export const App: React.FC = () => {
                         onChange={(e) => setGenSelectedCampaign(e.target.value)}
                         className="w-full px-3 py-2 text-xs font-mono font-bold border border-ic-border bg-white"
                       >
-                        {campaigns.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
+                        {campaigns.length === 0 ? (
+                          <option value="">— Crear campaña en Configuración —</option>
+                        ) : (
+                          campaigns.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
 
@@ -2266,7 +2332,7 @@ export const App: React.FC = () => {
                         Periodo Activo:
                       </span>
                       <span className="px-2 py-0.5 bg-white border border-ic-border font-mono font-bold text-ic-red">
-                        {activePeriod}
+                        {activePeriod || 'Sin definir'}
                       </span>
                     </div>
                   </div>
@@ -2274,19 +2340,32 @@ export const App: React.FC = () => {
                   {/* Número de WhatsApp */}
                   {genChannel !== 'asesor_prospector' && (
                     <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
-                        Número de WhatsApp
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-wider text-ic-muted">
+                          Número de WhatsApp
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('tools')}
+                          className="text-[11px] text-ic-red font-medium hover:underline"
+                        >
+                          + Crear Número
+                        </button>
+                      </div>
                       <select
                         value={genWaPhone}
                         onChange={(e) => setGenWaPhone(e.target.value)}
                         className="w-full px-3 py-2 text-xs border border-ic-border bg-white"
                       >
-                        {waNumbers.map((w) => (
-                          <option key={w.id} value={w.phone_number}>
-                            {w.label} (+{w.phone_number})
-                          </option>
-                        ))}
+                        {waNumbers.length === 0 ? (
+                          <option value="">— Crear número en Configuración —</option>
+                        ) : (
+                          waNumbers.map((w) => (
+                            <option key={w.id} value={w.phone_number}>
+                              {w.label} (+{w.phone_number})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   )}
@@ -2678,24 +2757,22 @@ export const App: React.FC = () => {
                       className="p-3 flex items-center justify-between text-xs hover:bg-gray-50"
                     >
                       <span className="font-mono font-bold text-ic-dark">{camp}</span>
-                      {campaigns.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setConfirmDelete({
-                              title: `¿Seguro que quieres eliminar la campaña "${camp}"?`,
-                              description: 'Se quitará de la lista de campañas disponibles.',
-                              onConfirm: async () => {
-                                await DataEngine.deleteCampaign(camp);
-                                refreshLocalState();
-                              },
-                            })
-                          }
-                          className="p-1 text-ic-muted hover:text-ic-red"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfirmDelete({
+                            title: `¿Seguro que quieres eliminar la campaña "${camp}"?`,
+                            description: 'Se quitará de la lista de campañas disponibles.',
+                            onConfirm: async () => {
+                              await DataEngine.deleteCampaign(camp);
+                              refreshLocalState();
+                            },
+                          })
+                        }
+                        className="p-1 text-ic-muted hover:text-ic-red"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -3064,23 +3141,21 @@ export const App: React.FC = () => {
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
-                        {waNumbers.length > 1 && (
-                          <button
-                            onClick={() =>
-                              setConfirmDelete({
-                                title: '¿Seguro que quieres eliminar este número de WhatsApp?',
-                                description: `Se eliminará "${w.label}" (+${w.phone_number}).`,
-                                onConfirm: async () => {
-                                  await DataEngine.deleteWhatsAppNumber(w.id);
-                                  refreshLocalState();
-                                },
-                              })
-                            }
-                            className="p-1 text-ic-muted hover:text-ic-red"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button
+                          onClick={() =>
+                            setConfirmDelete({
+                              title: '¿Seguro que quieres eliminar este número de WhatsApp?',
+                              description: `Se eliminará "${w.label}" (+${w.phone_number}).`,
+                              onConfirm: async () => {
+                                await DataEngine.deleteWhatsAppNumber(w.id);
+                                refreshLocalState();
+                              },
+                            })
+                          }
+                          className="p-1 text-ic-muted hover:text-ic-red"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -3095,17 +3170,26 @@ export const App: React.FC = () => {
                   </h2>
                 </div>
 
-                <select
-                  value={qrSelectedUrl}
-                  onChange={(e) => setQrSelectedUrl(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
-                >
-                  {links.map((l) => (
-                    <option key={l.id} value={l.short_url}>
-                      {l.subcampaign.toUpperCase()}_{l.period} — {l.career}
-                    </option>
-                  ))}
-                </select>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-ic-muted mb-1">
+                    Enlace Generado Activo
+                  </label>
+                  <select
+                    value={qrSelectedUrl}
+                    onChange={(e) => setQrSelectedUrl(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
+                  >
+                    {generatedLinkOptions.length === 0 ? (
+                      <option value="">— Sin enlaces generados —</option>
+                    ) : (
+                      generatedLinkOptions.map((opt) => (
+                        <option key={opt.id} value={opt.short_url}>
+                          {opt.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
 
                 <div className="flex items-center gap-4 p-3 bg-[#FAFAFA] border border-ic-border">
                   <div className="bg-white p-2 border border-ic-border">
@@ -3169,11 +3253,15 @@ export const App: React.FC = () => {
                     onChange={(e) => setSimLinkId(Number(e.target.value))}
                     className="w-full px-3 py-2 text-xs font-mono border border-ic-border bg-white"
                   >
-                    {links.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        [{l.short_code}] {CHANNEL_LABELS[l.channel]} ({l.subcampaign}) — {l.career}
-                      </option>
-                    ))}
+                    {generatedLinkOptions.length === 0 ? (
+                      <option value={0}>— Sin enlaces generados —</option>
+                    ) : (
+                      generatedLinkOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
