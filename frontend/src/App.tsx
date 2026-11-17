@@ -941,44 +941,28 @@ export const App: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen w-full flex bg-white text-ic-dark">
-        {/* MITAD IZQUIERDA (50%) */}
-        <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B0F17] overflow-hidden flex-col justify-between p-12">
+        {/* MITAD IZQUIERDA (50%): Solo imagen limpia sin logo */}
+        <div className="hidden lg:block lg:w-1/2 relative bg-[#0B0F17] overflow-hidden">
           <img
             src="https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&w=1600&q=85"
             alt="Instituto Continental"
-            className="absolute inset-0 w-full h-full object-cover opacity-55"
+            className="absolute inset-0 w-full h-full object-cover opacity-65"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17]/90 via-transparent to-[#0B0F17]/40" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17]/80 via-transparent to-[#0B0F17]/30" />
           <div className="absolute top-0 left-0 w-2 h-full bg-ic-red" />
-
-          <div className="relative z-10">
-            <a href="/app/" className="inline-block bg-white px-3 py-2">
-              <img
-                src={LOGO_IC_NEGRO}
-                alt="Instituto Continental"
-                className="h-7 w-auto"
-              />
-            </a>
-          </div>
-
-          <div className="relative z-10 text-xs font-mono uppercase tracking-widest text-white/80">
-            TRACE IC
-          </div>
         </div>
 
-        {/* MITAD DERECHA (50%): Login Centrado y Minimalista */}
-        <div className="w-full lg:w-1/2 flex flex-col justify-between p-8 sm:p-14 bg-white">
-          <div>
+        {/* MITAD DERECHA (50%): Login Centrado sin footer */}
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-8 sm:p-14 bg-white">
+          <div className="w-full max-w-sm space-y-6">
             <a href="/app/" className="inline-block">
               <img
                 src={LOGO_IC_NEGRO}
                 alt="Instituto Continental"
-                className="h-7 w-auto"
+                className="h-8 w-auto"
               />
             </a>
-          </div>
 
-          <div className="w-full max-w-sm mx-auto my-auto space-y-6">
             <div className="space-y-1">
               <div className="w-8 h-1 bg-ic-red mb-3" />
               <h1 className="text-3xl font-serif font-bold text-ic-dark">
@@ -1037,24 +1021,6 @@ export const App: React.FC = () => {
                 {loginLoading ? 'Ingresando...' : 'Ingresar'}
               </button>
             </form>
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] text-ic-muted border-t border-ic-border pt-4">
-            <a href="/app/">
-              <img
-                src={LOGO_IC_NEGRO}
-                alt="Instituto Continental"
-                className="h-5 w-auto"
-              />
-            </a>
-            <a
-              href="https://lumine.pe"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-ic-dark transition-colors"
-            >
-              Copyright © 2026
-            </a>
           </div>
         </div>
       </div>
