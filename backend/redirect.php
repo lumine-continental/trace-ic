@@ -196,8 +196,18 @@ try {
     $phone = $paramPhone !== '' ? $paramPhone : preg_replace('/\D/', '', (string) ($link['whatsapp_phone'] ?: '51987654321'));
     $advisorName = null;
 
+    // Formatear CARRERA + PERIODO para el código de atención
+    $accentMap = [
+        'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n', 'ü' => 'u',
+        'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N', 'Ü' => 'U',
+    ];
+    $careerClean = strtoupper(strtr($finalCareer, $accentMap));
+    $careerClean = preg_replace('/\s+/', '_', trim($careerClean));
+    $careerClean = preg_replace('/[^A-Z0-9_]/', '', $careerClean);
+    $careerClean = trim((string) preg_replace('/_+/', '_', $careerClean), '_') ?: 'CARRERA';
+    $attentionCode = $careerClean . '_' . $finalPeriod;
+
     if ($link['channel'] === 'asesor_prospector') {
-        $attentionCode = $finalCampaign . '_' . $finalPeriod;
         $advisorName = $finalSubcampaign ?: 'Asesor';
         try {
             $advStmt = $pdo->prepare('SELECT name, phone_number FROM advisors WHERE LOWER(name) = LOWER(:n) LIMIT 1');
@@ -212,11 +222,12 @@ try {
         } catch (\Throwable $e) {
             // Ignorar
         }
-        $message = "Hola {$advisorName}, vengo de Asesor / Prospector, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
+        $subchannelText = $advisorName;
     } else {
-        $attentionCode = strtoupper($finalSubcampaign) . '_' . $finalPeriod;
-        $message = "Hola, vengo de {$channelDisplay}, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
+        $subchannelText = $finalSubcampaign;
     }
+
+    $message = "Hola, vengo de {$subchannelText}, quisiera más información sobre {$finalCampaign}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
 
     $shortLinkDisplay = sprintf(
         'trace.icontinental.edu.pe/%s?utm=%s&campana=%s&carrera=%s&periodo=%s',

@@ -528,8 +528,8 @@ export const App: React.FC = () => {
   // CÁLCULO EN VIVO DEL MENSAJE PRE-GENERADO EN EL GENERADOR DE ENLACES
   // ===========================================================================
   const effectiveSubchannel = useMemo(() => {
-    if (genChannel === 'asesor_prospector') return genAdvisorName || 'Gerber';
-    return genSubchannel || 'portal-web';
+    if (genChannel === 'asesor_prospector') return genAdvisorName || '[SUBCANAL]';
+    return genSubchannel || '[SUBCANAL]';
   }, [genChannel, genSubchannel, genAdvisorName]);
 
   const effectivePhone = useMemo(() => {
@@ -657,6 +657,7 @@ export const App: React.FC = () => {
         channel: r.channel,
         subchannel: r.subcampaign,
         campaign: r.campaign,
+        career: r.career,
         period: r.period,
       });
       const existing = map.get(key);
@@ -714,7 +715,13 @@ export const App: React.FC = () => {
       .filter((r) => r.channel !== 'asesor_prospector')
       .forEach((r) => {
         const key = `${r.subcampaign}::${r.channel}::${r.period}`;
-        const code = `${r.subcampaign.toUpperCase()}_${r.period}`;
+        const code = buildAttentionCode({
+          channel: r.channel,
+          subchannel: r.subcampaign,
+          campaign: r.campaign,
+          career: r.career,
+          period: r.period,
+        });
         const existing = map.get(key);
         if (!existing) {
           map.set(key, {
@@ -729,6 +736,9 @@ export const App: React.FC = () => {
         } else {
           existing.clicks += r.clicks;
           existing.unique += r.unique_visitors;
+          if (!existing.code.includes(code)) {
+            existing.code += `, ${code}`;
+          }
         }
       });
 
@@ -842,6 +852,7 @@ export const App: React.FC = () => {
         channel: r.channel,
         subchannel: r.subcampaign,
         campaign: r.campaign,
+        career: r.career,
         period: r.period,
       })}"`,
       `"${r.whatsapp_phone}"`,
@@ -1618,6 +1629,7 @@ export const App: React.FC = () => {
                               channel: row.channel,
                               subchannel: row.subcampaign,
                               campaign: row.campaign,
+                              career: row.career,
                               period: row.period,
                             });
                             return (
@@ -2419,6 +2431,7 @@ export const App: React.FC = () => {
                         channel: link.channel,
                         subchannel: link.subcampaign,
                         campaign: link.campaign,
+                        career: link.career,
                         period: link.period,
                       });
                       return (

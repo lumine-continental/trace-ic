@@ -135,31 +135,39 @@ export function isValidPeriodCode(code: string): boolean {
 }
 
 /**
+ * Formatea el nombre de la carrera para el código de atención (MAYÚSCULAS, sin tildes, espacios a _)
+ */
+export function formatCareerForCode(career: string): string {
+  const noAccents = (career || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const upper = noAccents.toUpperCase();
+  const spaceToUnderscore = upper.replace(/\s+/g, '_');
+  const validChars = spaceToUnderscore.replace(/[^A-Z0-9_]/g, '');
+  return validChars.replace(/_+/g, '_').replace(/^_|_$/g, '') || '[CARRERA]';
+}
+
+/**
  * Construye el código de atención:
- * - Para Orgánico, Pauta y Nurturing: [SUBCANAL]_[PERIODO] (ej: TIKTOK-ADS_202710, PORTAL-WEB_202710)
- * - Para Asesor / Prospector: [CAMPAÑA]_[PERIODO]
+ * CODIGO = CARRERA + PERIODO (ej: ADMINISTRACION_DE_EMPRESAS_202710)
  */
 export function buildAttentionCode(params: {
-  channel: ChannelKey;
-  subchannel: string;
-  campaign: string;
+  channel?: ChannelKey;
+  subchannel?: string;
+  campaign?: string;
+  career?: string;
   period: string;
 }): string {
-  const cleanPer = params.period || '202710';
-  if (params.channel === 'asesor_prospector') {
-    const cleanCamp = sanitizeCampaignInput(params.campaign) || 'PRESENCIAL';
-    return `${cleanCamp}_${cleanPer}`;
-  }
-  const cleanSub = (params.subchannel || 'PORTAL-WEB').trim().toUpperCase();
-  return `${cleanSub}_${cleanPer}`;
+  const cleanPer = params.period?.trim() || '[PERIODO]';
+  const cleanCar = formatCareerForCode(params.career || '');
+  return `${cleanCar}_${cleanPer}`;
 }
 
 /**
  * Construye el texto pre-escrito de WhatsApp:
- * - En todos menos asesores:
- *   "Hola, vengo de [CANAL], quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=SUBCANAL+PERIODO]"
- * - En Asesor / Prospector:
- *   "Hola [ASESOR], vengo de Asesor / Prospector, quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CÓDIGO=CAMPAÑA+PERIODO]"
+ * "Hola, vengo de [SUBCANAL], quisiera más información sobre [CAMPAÑA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CODIGO]"
+ * Donde CODIGO = CARRERA + PERIODO
  */
 export function buildDefaultWhatsAppMessage(params: {
   channel: ChannelKey;
@@ -169,20 +177,19 @@ export function buildDefaultWhatsAppMessage(params: {
   subchannel?: string;
   advisorName?: string;
 }): string {
-  const cleanCareer = params.career.trim() || 'Diseño de Modas';
-  const sub = params.subchannel?.trim() || 'portal-web';
+  const cleanCampaign = sanitizeCampaignInput(params.campaign) || '[CAMPAÑA]';
+  const sub =
+    params.channel === 'asesor_prospector'
+      ? params.advisorName?.trim() || params.subchannel?.trim() || '[SUBCANAL]'
+      : params.subchannel?.trim() || '[SUBCANAL]';
+
   const code = buildAttentionCode({
     channel: params.channel,
     subchannel: sub,
     campaign: params.campaign,
+    career: params.career,
     period: params.period,
   });
 
-  if (params.channel === 'asesor_prospector') {
-    const advisor = params.advisorName?.trim() || sub || 'Gerber';
-    return `Hola ${advisor}, vengo de Asesor / Prospector, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
-  }
-
-  const channelLabel = CHANNEL_LABELS[params.channel];
-  return `Hola, vengo de ${channelLabel}, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+  return `Hola, vengo de ${sub}, quisiera más información sobre ${cleanCampaign}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }
