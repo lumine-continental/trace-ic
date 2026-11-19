@@ -176,5 +176,9 @@ export function buildDefaultWhatsAppMessage(params: {
     period: params.period,
   });
 
+  if (params.channel === 'asesor_prospector') {
+    return `Hola, soy ${sub}, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+  }
+
   return `Hola, vengo de ${sub}, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }

@@ -215,11 +215,11 @@ try {
             // Ignorar
         }
         $subchannelText = $advisorName;
+        $message = "Hola, soy {$subchannelText}, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     } else {
         $subchannelText = $finalSubcampaign;
+        $message = "Hola, vengo de {$subchannelText}, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
     }
-
-    $message = "Hola, vengo de {$subchannelText}, quisiera más información sobre {$finalCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es {$attentionCode}";
 
     $shortLinkDisplay = sprintf(
         'trace.icontinental.edu.pe/%s?utm=%s&campana=%s&carrera=%s&periodo=%s',
