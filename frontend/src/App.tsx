@@ -685,6 +685,9 @@ export const App: React.FC = () => {
         if (!existing.campaign.includes(r.campaign)) {
           existing.campaign += `, ${r.campaign}`;
         }
+        if (!existing.code.includes(code)) {
+          existing.code += `, ${code}`;
+        }
       }
     });
 

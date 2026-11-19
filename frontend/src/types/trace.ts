@@ -135,22 +135,8 @@ export function isValidPeriodCode(code: string): boolean {
 }
 
 /**
- * Formatea el nombre de la carrera para el código de atención (MAYÚSCULAS, sin tildes, espacios a _)
- */
-export function formatCareerForCode(career: string): string {
-  const noAccents = (career || '')
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  const upper = noAccents.toUpperCase();
-  const spaceToUnderscore = upper.replace(/\s+/g, '_');
-  const validChars = spaceToUnderscore.replace(/[^A-Z0-9_]/g, '');
-  return validChars.replace(/_+/g, '_').replace(/^_|_$/g, '') || '[CARRERA]';
-}
-
-/**
  * Construye el código de atención:
- * CODIGO = CARRERA + PERIODO (ej: ADMINISTRACION_DE_EMPRESAS_202710)
+ * CODIGO = CAMPAÑA + PERIODO (ej: PRESENCIAL_202710)
  */
 export function buildAttentionCode(params: {
   channel?: ChannelKey;
@@ -160,14 +146,13 @@ export function buildAttentionCode(params: {
   period: string;
 }): string {
   const cleanPer = params.period?.trim() || '[PERIODO]';
-  const cleanCar = formatCareerForCode(params.career || '');
-  return `${cleanCar}_${cleanPer}`;
+  const cleanCamp = sanitizeCampaignInput(params.campaign || '') || '[CAMPAÑA]';
+  return `${cleanCamp}_${cleanPer}`;
 }
 
 /**
  * Construye el texto pre-escrito de WhatsApp:
- * "Hola, vengo de [SUBCANAL], quisiera más información sobre [CAMPAÑA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CODIGO]"
- * Donde CODIGO = CARRERA + PERIODO
+ * "Hola, vengo de [SUBCANAL], quisiera más información sobre [CARRERA], en el Instituto y Escuela Superior Continental. Mi código de atención es [CAMPAÑA + PERIODO]"
  */
 export function buildDefaultWhatsAppMessage(params: {
   channel: ChannelKey;
@@ -177,7 +162,7 @@ export function buildDefaultWhatsAppMessage(params: {
   subchannel?: string;
   advisorName?: string;
 }): string {
-  const cleanCampaign = sanitizeCampaignInput(params.campaign) || '[CAMPAÑA]';
+  const cleanCareer = params.career?.trim() || '[CARRERA]';
   const sub =
     params.channel === 'asesor_prospector'
       ? params.advisorName?.trim() || params.subchannel?.trim() || '[SUBCANAL]'
@@ -191,5 +176,5 @@ export function buildDefaultWhatsAppMessage(params: {
     period: params.period,
   });
 
-  return `Hola, vengo de ${sub}, quisiera más información sobre ${cleanCampaign}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
+  return `Hola, vengo de ${sub}, quisiera más información sobre ${cleanCareer}, en el Instituto y Escuela Superior Continental. Mi código de atención es ${code}`;
 }
